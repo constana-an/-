@@ -34,7 +34,7 @@ export function MemoriesScreen({
       <div className="stats-row"><div><HeartFilledIcon /><strong>{days}</strong><span>相爱天数</span></div><div><StarFilledIcon /><strong>{orders.length}</strong><span>甜蜜订单</span></div><div><CalendarIcon /><strong>{startedLabel}</strong><span>开始日期</span></div></div>
       <div className="checkin-card">
         <span className="checkin-flame"><SunIcon /></span>
-        <div><small>连续签到</small><strong>{checkin.streak} 天</strong><p>每天一起回来看看，获得 1 甜心币</p></div>
+        <div><small>连续签到</small><strong>{checkin.streak} 天</strong><p>每天回来看看，给自己的钱包 +1 甜心币</p></div>
         <button disabled={checkin.checkedToday} onClick={onCheckin}>{checkin.checkedToday ? "今日已签" : "签到 +1"}</button>
       </div>
       <div className="memory-section-heading"><div><small>只属于你们的相册</small><h3>照片回忆</h3></div><button onClick={onAddMemory}><CameraIcon /> 添加</button></div>

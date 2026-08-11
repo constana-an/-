@@ -1,5 +1,6 @@
-import { isValidDateKey, todayKey } from "./date";
-import type { CoupleProfile, Identity, Order } from "./types";
+import { isValidDateKey, todayKey } from "./date.ts";
+import { IDENTITIES } from "./types.ts";
+import type { CoupleProfile, Identity, Order } from "./types.ts";
 
 export const STORAGE_KEYS = {
   profile: "couple-shop-profile",
@@ -48,26 +49,44 @@ export function loadLocalOrders(): Order[] {
   }
 }
 
+export const OPENING_BALANCE = 8;
+
+/** Wallets are per identity: 大宝 cannot spend 二宝's coins, and vice versa. */
+export const walletKey = (identity: Identity) => `${STORAGE_KEYS.coins}:${identity}`;
+export const claimsKey = (identity: Identity) => `${STORAGE_KEYS.taskClaims}:${identity}`;
+
 /**
- * Economy version 2 reset every wallet to 8 coins when prices were rebalanced.
- * Version 3 halves per-person task rewards; balances stay untouched because the
- * couple's combined earning rate is unchanged.
+ * Economy version 4 split the single shared wallet into one wallet per person.
+ * Both sides restart at the opening balance, matching the cloud migration, and
+ * the old shared keys are cleared so nothing reads them again.
  */
-export function loadEconomyCoins(): number {
-  const version = localStorage.getItem(STORAGE_KEYS.economyVersion);
-  if (version !== "2" && version !== "3") {
-    localStorage.setItem(STORAGE_KEYS.economyVersion, "3");
-    localStorage.setItem(STORAGE_KEYS.coins, "8");
-    return 8;
+function migrateEconomy(): void {
+  if (localStorage.getItem(STORAGE_KEYS.economyVersion) === "4") return;
+  localStorage.setItem(STORAGE_KEYS.economyVersion, "4");
+  localStorage.removeItem(STORAGE_KEYS.coins);
+  localStorage.removeItem(STORAGE_KEYS.taskClaims);
+  for (const identity of IDENTITIES) {
+    localStorage.removeItem(walletKey(identity));
+    localStorage.removeItem(claimsKey(identity));
   }
-  localStorage.setItem(STORAGE_KEYS.economyVersion, "3");
-  const saved = Number(localStorage.getItem(STORAGE_KEYS.coins));
-  return Number.isFinite(saved) && saved >= 0 ? saved : 8;
 }
 
-export function loadTaskClaims(): string[] {
+export function loadEconomyCoins(identity: Identity | null): number {
+  migrateEconomy();
+  if (!identity) return OPENING_BALANCE;
+  // Read the raw string: `Number(null)` is 0, which would silently open a new
+  // wallet at zero coins instead of the opening balance.
+  const raw = localStorage.getItem(walletKey(identity));
+  if (raw === null) return OPENING_BALANCE;
+  const saved = Number(raw);
+  return Number.isFinite(saved) && saved >= 0 ? saved : OPENING_BALANCE;
+}
+
+export function loadTaskClaims(identity: Identity | null): string[] {
+  migrateEconomy();
+  if (!identity) return [];
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.taskClaims) ?? "[]") as unknown;
+    const saved = JSON.parse(localStorage.getItem(claimsKey(identity)) ?? "[]") as unknown;
     return Array.isArray(saved) ? saved.filter((value): value is string => typeof value === "string") : [];
   } catch {
     return [];

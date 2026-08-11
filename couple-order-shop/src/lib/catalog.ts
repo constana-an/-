@@ -1,6 +1,6 @@
 import { ActivityLogIcon, BookmarkIcon, CameraIcon, ChatBubbleIcon, CheckCircledIcon, HeartIcon, HomeIcon, RocketIcon, StarFilledIcon, SunIcon, TimerIcon } from "@radix-ui/react-icons";
-import { todayKey, weekKey } from "./date";
-import type { Category, CoupleTask, MenuItem, OrderStatus, TaskFrequency } from "./types";
+import { todayKey, weekKey } from "./date.ts";
+import type { Category, CoupleTask, MenuItem, OrderStatus, TaskFrequency } from "./types.ts";
 
 export const MENU: MenuItem[] = [
   { id: "fruit-tea", category: "food", name: "缤纷水果茶", description: "满杯鲜果，酸甜刚刚好", price: 28, image: "/assets/menu/fruit-tea.png", tint: "#fff0e5" },
@@ -40,20 +40,20 @@ export const MENU: MenuItem[] = [
 ];
 
 /**
- * Rewards are per person: both partners claim their own copy of every task.
- * They are half of the original single-earner values so the couple's combined
- * ceiling stays where the economy was designed — 8 coins a day and 28 coins a
- * week for the two of them together, roughly 84 coins in a perfect week.
+ * Every person owns their own wallet and funds their own orders, so rewards are
+ * sized for a single earner: at most 8 coins a day and 29 a week, about 85 in a
+ * perfect week, against a 28–360 price ladder. Both partners claim their own
+ * copy of each task; a claim by one never consumes the other's.
  */
 export const TASKS: CoupleTask[] = [
   { id: "morning", frequency: "daily", title: "好好说早安或晚安", description: "让今天从被惦记开始或结束", reward: 1, icon: SunIcon, tone: "gold" },
-  { id: "compliment", frequency: "daily", title: "认真夸对方一次", description: "要具体，不可以只说“你好看”", reward: 1, icon: ChatBubbleIcon, tone: "pink" },
-  { id: "mood", frequency: "daily", title: "分享今天的心情", description: "开心或委屈都可以被看见", reward: 1, icon: ActivityLogIcon, tone: "lavender" },
-  { id: "focus", frequency: "daily", title: "专心陪伴 20 分钟", description: "放下手机，认真听彼此说话", reward: 1, icon: TimerIcon, tone: "mint" },
-  { id: "photo", frequency: "weekly", title: "记录一张本周合照", description: "把普通日子也收藏起来", reward: 2, icon: CameraIcon, tone: "pink" },
-  { id: "walk-task", frequency: "weekly", title: "一起散步半小时", description: "边走边聊，不带任务地相处", reward: 3, icon: RocketIcon, tone: "mint" },
-  { id: "order-task", frequency: "weekly", title: "认真完成一份订单", description: "说到做到，是小铺最重要的规则", reward: 4, icon: CheckCircledIcon, tone: "gold" },
-  { id: "date-task", frequency: "weekly", title: "完成一次用心约会", description: "不看价格，重点是认真安排", reward: 5, icon: BookmarkIcon, tone: "lavender" },
+  { id: "compliment", frequency: "daily", title: "认真夸对方一次", description: "要具体，不可以只说“你好看”", reward: 2, icon: ChatBubbleIcon, tone: "pink" },
+  { id: "mood", frequency: "daily", title: "分享今天的心情", description: "开心或委屈都可以被看见", reward: 2, icon: ActivityLogIcon, tone: "lavender" },
+  { id: "focus", frequency: "daily", title: "专心陪伴 20 分钟", description: "放下手机，认真听彼此说话", reward: 3, icon: TimerIcon, tone: "mint" },
+  { id: "photo", frequency: "weekly", title: "记录一张本周合照", description: "把普通日子也收藏起来", reward: 5, icon: CameraIcon, tone: "pink" },
+  { id: "walk-task", frequency: "weekly", title: "一起散步半小时", description: "边走边聊，不带任务地相处", reward: 6, icon: RocketIcon, tone: "mint" },
+  { id: "order-task", frequency: "weekly", title: "认真完成一份订单", description: "说到做到，是小铺最重要的规则", reward: 8, icon: CheckCircledIcon, tone: "gold" },
+  { id: "date-task", frequency: "weekly", title: "完成一次用心约会", description: "不看价格，重点是认真安排", reward: 10, icon: BookmarkIcon, tone: "lavender" },
 ];
 
 /** What one person can earn in a perfect week: 7 daily rounds plus the weekly set. */

@@ -43,9 +43,9 @@ export function TasksScreen({
       <div className="task-hero">
         <div className="task-hero-top"><span><TargetIcon /> 我这周攒币计划</span><strong>{earnedThisWeek} / {WEEKLY_PERSONAL_GOAL}</strong></div>
         <h2>认真相爱，也会有奖励</h2>
-        <p>两个人各自领取自己的奖励，一起攒进同一个钱包。</p>
+        <p>每个人有自己的甜心币钱包，各攒各的，也各花各的。</p>
         <div className="task-progress" aria-label={`本周进度 ${progress}%`}><span style={{ width: `${progress}%` }} /></div>
-        <div className="task-balance"><HeartFilledIcon /><strong>{coins}</strong><span>双人共同甜心币</span></div>
+        <div className="task-balance"><HeartFilledIcon /><strong>{coins}</strong><span>我的甜心币</span></div>
       </div>
 
       <div className="task-heading"><div><span>每天零点刷新</span><h2>今日小任务</h2></div><strong>{daily.filter((task) => claimedTasks.includes(taskClaimKey(task))).length}/{daily.length}</strong></div>
@@ -54,7 +54,7 @@ export function TasksScreen({
       <div className="task-heading weekly"><div><span>每周一刷新</span><h2>本周共同任务</h2></div><strong>{weekly.filter((task) => claimedTasks.includes(taskClaimKey(task))).length}/{weekly.length}</strong></div>
       <div className="task-list">{weekly.map(renderTask)}</div>
 
-      <div className="economy-note"><span><MoonIcon /></span><div><strong>慢慢攒，更值得期待</strong><p>两人合计每天最多 8 币、每周额外 28 币；食物也要攒数天，服务与约会通常需要两周以上。</p></div></div>
+      <div className="economy-note"><span><MoonIcon /></span><div><strong>慢慢攒，更值得期待</strong><p>每人每天最多 8 币、每周额外 29 币；食物也要攒数天，服务与约会通常需要两周以上。</p></div></div>
     </section>
   );
 }

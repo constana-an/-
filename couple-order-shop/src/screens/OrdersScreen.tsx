@@ -46,7 +46,7 @@ export function OrdersScreen({
                   <button className="primary-action" onClick={() => onStatus(order.id, "accepted")}><CheckIcon /> 接单</button>
                 </div>
               ) : (
-                <div className="order-waiting"><ClockIcon /> 等 {order.to} 接单，婉拒会退回甜心币</div>
+                <div className="order-waiting"><ClockIcon /> 等 {order.to} 接单，婉拒会把甜心币退给你</div>
               ))}
               {order.status === "accepted" && (mine
                 ? <button className="wide-action" onClick={() => onStatus(order.id, "doing")}><ClockIcon /> 开始准备</button>

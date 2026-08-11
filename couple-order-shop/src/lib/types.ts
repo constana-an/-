@@ -78,6 +78,9 @@ export type MembershipState = {
   status: string;
 };
 
+/** The two fixed identity slots. Each one owns its own sweet-heart coin wallet. */
+export const IDENTITIES: Identity[] = ["大宝", "二宝"];
+
 export const partnerFor = (identity: Identity): Identity => (identity === "大宝" ? "二宝" : "大宝");
 
 export function displayNameFor(profile: CoupleProfile, identity: Identity): string {

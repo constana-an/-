@@ -27,11 +27,13 @@ import { cloudEnabled, getSupabase, type SupabaseClient } from "./lib/supabase";
 import {
   DEFAULT_PROFILE,
   STORAGE_KEYS,
+  claimsKey,
   loadCoupleProfile,
   loadEconomyCoins,
   loadIdentity,
   loadLocalOrders,
   loadTaskClaims,
+  walletKey,
 } from "./lib/storage";
 import { displayNameFor, partnerFor } from "./lib/types";
 import type {
@@ -63,6 +65,8 @@ const notificationsSupported = typeof window !== "undefined" && "Notification" i
 const SIGNED_URL_TTL_SECONDS = 3600;
 const SIGNED_URL_REFRESH_MS = 45 * 60 * 1000;
 
+type Wallet = { owner: Identity | null; coins: number; claims: string[] };
+
 function newId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
@@ -90,8 +94,20 @@ export default function Prototype() {
   const [view, setView] = useState<MainView>("shop");
   const [category, setCategory] = useState<Category>("food");
   const [orders, setOrders] = useState<Order[]>(loadLocalOrders);
-  const [coins, setCoins] = useState(loadEconomyCoins);
-  const [claimedTasks, setClaimedTasks] = useState<string[]>(loadTaskClaims);
+  // Coins, claims and their owner move as one value: a half-applied identity
+  // switch would otherwise write one person's balance into the other's wallet.
+  const [wallet, setWallet] = useState<Wallet>(() => {
+    const owner = loadIdentity();
+    return { owner, coins: loadEconomyCoins(owner), claims: loadTaskClaims(owner) };
+  });
+  const coins = wallet.coins;
+  const claimedTasks = wallet.claims;
+  const setCoins = useCallback((next: number | ((current: number) => number)) => {
+    setWallet((current) => ({ ...current, coins: typeof next === "function" ? next(current.coins) : next }));
+  }, []);
+  const setClaimedTasks = useCallback((next: string[] | ((current: string[]) => string[])) => {
+    setWallet((current) => ({ ...current, claims: typeof next === "function" ? next(current.claims) : next }));
+  }, []);
   const [selected, setSelected] = useState<MenuItem | null>(null);
   const [note, setNote] = useState("");
   const [time, setTime] = useState("今晚 20:30");
@@ -264,6 +280,14 @@ export default function Prototype() {
     setOrders((current) => current.map((order) => ({ ...order, from: rename(order.from), to: rename(order.to) })));
   }, [profile.firstName, profile.secondName, cloudCoupleId]);
 
+  // Switching identity on this device swaps to that person's wallet.
+  useEffect(() => {
+    if (!identity || cloudCoupleId) return;
+    setWallet((current) => (current.owner === identity
+      ? current
+      : { owner: identity, coins: loadEconomyCoins(identity), claims: loadTaskClaims(identity) }));
+  }, [identity, cloudCoupleId]);
+
   useEffect(() => {
     const channel = new BroadcastChannel("couple-order-shop");
     broadcastChannel.current = channel;
@@ -271,28 +295,46 @@ export default function Prototype() {
       if (!cloudCoupleId && event.data?.type === "sync") {
         applyingBroadcast.current = true;
         setOrders(event.data.orders);
-        setCoins(event.data.coins);
-        if (event.data.claimedTasks) setClaimedTasks(event.data.claimedTasks);
         if (event.data.profile) setProfile(event.data.profile);
+        // A wallet only ever accepts an update addressed to its own owner.
+        if (event.data.walletOwner && event.data.walletOwner === identity) {
+          setCoins(event.data.coins);
+          if (event.data.claimedTasks) setClaimedTasks(event.data.claimedTasks);
+        }
       }
     };
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    // Only in a real build: the worker caches by URL, and Vite's dev module
+    // URLs are unhashed, so registering it in dev serves yesterday's code.
+    if (import.meta.env.PROD && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    }
     return () => {
       broadcastChannel.current = null;
       channel.close();
     };
-  }, [cloudCoupleId]);
+  }, [cloudCoupleId, identity, setCoins, setClaimedTasks]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.orders, JSON.stringify(orders));
-    localStorage.setItem(STORAGE_KEYS.coins, String(coins));
-    localStorage.setItem(STORAGE_KEYS.taskClaims, JSON.stringify(claimedTasks));
+    if (wallet.owner && !cloudCoupleId) {
+      localStorage.setItem(walletKey(wallet.owner), String(wallet.coins));
+      localStorage.setItem(claimsKey(wallet.owner), JSON.stringify(wallet.claims));
+    }
     if (applyingBroadcast.current) {
       applyingBroadcast.current = false;
       return;
     }
-    if (!cloudCoupleId) broadcastChannel.current?.postMessage({ type: "sync", orders, coins, claimedTasks, profile });
-  }, [orders, coins, claimedTasks, profile, cloudCoupleId]);
+    if (!cloudCoupleId) {
+      broadcastChannel.current?.postMessage({
+        type: "sync",
+        orders,
+        profile,
+        walletOwner: wallet.owner,
+        coins: wallet.coins,
+        claimedTasks: wallet.claims,
+      });
+    }
+  }, [orders, wallet, profile, cloudCoupleId]);
 
   const signMemoryRows = useCallback(async (
     client: SupabaseClient,
@@ -344,14 +386,19 @@ export default function Prototype() {
     })));
   }, []);
 
+  /** Wallets are personal, so the balance lives on this user's profile row. */
+  const loadMyBalance = useCallback(async (client: SupabaseClient) => {
+    const { data } = await client.from("profiles").select("coin_balance").maybeSingle();
+    if (typeof data?.coin_balance === "number") setCoins(data.coin_balance);
+  }, [setCoins]);
+
   const loadCouple = useCallback(async (client: SupabaseClient, coupleId: string) => {
     const { data } = await client
       .from("couples")
-      .select("coin_balance, name, partner_a_name, partner_b_name, started_on")
+      .select("name, partner_a_name, partner_b_name, started_on")
       .eq("id", coupleId)
       .maybeSingle();
     if (!data) return;
-    if (typeof data.coin_balance === "number") setCoins(data.coin_balance);
     setProfile({
       shopName: data.name || DEFAULT_PROFILE.shopName,
       firstName: data.partner_a_name || DEFAULT_PROFILE.firstName,
@@ -387,6 +434,7 @@ export default function Prototype() {
       await Promise.all([
         loadOrders(client, coupleId),
         loadCouple(client, coupleId),
+        loadMyBalance(client),
         loadMemories(client, coupleId),
         loadAnniversaries(client, coupleId),
       ]);
@@ -417,9 +465,10 @@ export default function Prototype() {
 
     // Each table refreshes only what it owns instead of replaying every query.
     const channel = client.channel(`couple:${coupleId}`)
+      // An order event is also how a sender learns a decline refunded them.
       .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `couple_id=eq.${coupleId}` }, () => {
         void loadOrders(client, coupleId);
-        void loadCouple(client, coupleId);
+        void loadMyBalance(client);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "couples", filter: `id=eq.${coupleId}` }, () => {
         void loadCouple(client, coupleId);
@@ -435,7 +484,7 @@ export default function Prototype() {
       active = false;
       client.removeChannel(channel);
     };
-  }, [supabase, cloudCoupleId, authUser, loadOrders, loadCouple, loadMemories, loadAnniversaries]);
+  }, [supabase, cloudCoupleId, authUser, loadOrders, loadCouple, loadMyBalance, loadMemories, loadAnniversaries, setClaimedTasks]);
 
   // Signed photo links expire after an hour; refresh them when the album is
   // opened again or the app returns to the foreground.
@@ -478,11 +527,11 @@ export default function Prototype() {
     localStorage.removeItem(STORAGE_KEYS.cloudId);
     localStorage.removeItem(STORAGE_KEYS.inviteCode);
     localStorage.removeItem(STORAGE_KEYS.orders);
-    localStorage.removeItem(STORAGE_KEYS.taskClaims);
     setCloudCoupleId(null);
     setInviteCode(null);
     setOrders([]);
-    setClaimedTasks([]);
+    // Back to local mode: fall back to this identity's on-device wallet.
+    setWallet({ owner: identity, coins: loadEconomyCoins(identity), claims: loadTaskClaims(identity) });
     setMemories([]);
     setAnniversaries([]);
     setCheckin({ streak: 0, checkedToday: false });
@@ -576,11 +625,12 @@ export default function Prototype() {
 
   const exportData = async () => {
     try {
-      let payload: Record<string, unknown> = { exportedAt: new Date().toISOString(), formatVersion: 1, profile, orders, claimedTasks, memories, anniversaries };
+      let payload: Record<string, unknown> = { exportedAt: new Date().toISOString(), formatVersion: 2, profile, coins, orders, claimedTasks, memories, anniversaries };
       const client = cloudCoupleId ? await getSupabase() : null;
       if (client && cloudCoupleId) {
-        const [coupleData, orderData, taskData, memoryData, anniversaryData, checkinData, auditData] = await Promise.all([
-          client.from("couples").select("name, partner_a_name, partner_b_name, started_on, coin_balance, created_at").eq("id", cloudCoupleId).maybeSingle(),
+        const [coupleData, walletData, orderData, taskData, memoryData, anniversaryData, checkinData, auditData] = await Promise.all([
+          client.from("couples").select("name, partner_a_name, partner_b_name, started_on, created_at").eq("id", cloudCoupleId).maybeSingle(),
+          client.from("profiles").select("display_name, coin_balance, created_at").maybeSingle(),
           client.from("orders").select("*").eq("couple_id", cloudCoupleId),
           client.from("task_claims").select("task_id, period_key, reward, created_at").eq("couple_id", cloudCoupleId),
           client.from("memory_entries").select("caption, happened_on, image_path, created_at").eq("couple_id", cloudCoupleId),
@@ -590,8 +640,9 @@ export default function Prototype() {
         ]);
         payload = {
           exportedAt: new Date().toISOString(),
-          formatVersion: 1,
+          formatVersion: 2,
           couple: coupleData.data,
+          myWallet: walletData.data,
           orders: orderData.data,
           taskClaims: taskData.data,
           memories: memoryData.data,
@@ -824,11 +875,14 @@ export default function Prototype() {
       const result = data as { coin_balance: number } | null;
       if (typeof result?.coin_balance === "number") setCoins(result.coin_balance);
     } else if (status === "rejected" && target) {
-      // Local mode has no server to refund the sender, so do it here.
-      setCoins((current) => current + target.price);
+      // Local mode has no server to refund with. The coins belong to whoever
+      // paid, which is normally the other identity's on-device wallet.
+      const payer = target.from === currentName ? identity : partnerIdentity;
+      if (payer && payer === wallet.owner) setCoins((current) => current + target.price);
+      else if (payer) localStorage.setItem(walletKey(payer), String(loadEconomyCoins(payer) + target.price));
     }
     setOrders((current) => current.map((order) => (order.id === id ? { ...order, status } : order)));
-    if (status === "rejected") showToast(`已婉拒，${target?.price ?? 0} 甜心币退回小铺`);
+    if (status === "rejected") showToast(`已婉拒，${target?.price ?? 0} 甜心币退回给${target?.from ?? "对方"}`);
     else if (status === "done") showToast("心愿完成，记得去任务中心领取奖励");
     else showToast(`订单已更新为「${statusText[status]}」`);
   };

@@ -20,6 +20,7 @@ npm run dev
    3. `supabase/migrations/20260811030000_couple_profile.sql`
    4. `supabase/migrations/20260811060000_commercial_foundation.sql`
    5. `supabase/migrations/20260811120000_timezone_refund_and_retention.sql`
+   6. `supabase/migrations/20260811150000_personal_wallets.sql`
 3. 复制 `.env.example` 为 `.env.local`，填写项目 URL 和 anon key。
 4. 生成一对 VAPID 密钥，把公钥填入 `VITE_WEB_PUSH_PUBLIC_KEY`。
 5. 将 `supabase/functions/notify-partner` 部署为 Edge Function，并设置 `VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`。
@@ -34,12 +35,13 @@ npm run dev
 
 ## 甜心币经济
 
-- 新用户初始 8 枚甜心币；甜心币是**双人共用的一个钱包**。
-- 任务奖励**按人计算，两个人各领各的**：每人每天最多 4 枚、每周额外最多 14 枚，两人合计即每天 8 枚、每周 28 枚。
-- 一个人全勤一周约 42 枚，双方合计上限约 84 枚；正常（非全勤）参与一周通常落在 30–50 枚。
+- **每个人有自己的钱包**：甜心币属于个人，另一半不能花你的币。云端存在 `profiles.coin_balance`，本地模式存在 `couple-shop-coins:<身份>`。
+- 双方各自从 8 枚开始。任务、签到的奖励只进入**领取者本人**的钱包；两个人各领各的，互不影响。
+- 每人每天最多 8 枚、每周额外最多 29 枚，全勤一周 85 枚；正常（非全勤）参与一周通常落在 30–50 枚。
 - 食物兑换为 28–78 枚；服务为 48–118 枚；约会为 60–188 枚；限定券为 120–360 枚。
-- 限定券每对情侣**永久只能使用一次**，已用过的会在小铺里置灰。
-- 订单被婉拒会**原路退回**甜心币；只有收到订单的一方可以接单、婉拒或推进状态。
+- 限定券每对情侣**永久只能使用一次**（不区分谁点的），已用过的会在小铺里置灰。
+- 下单从**下单人自己**的钱包扣币；被婉拒时原路退回给下单人，收单方的余额不受影响。只有收到订单的一方可以接单、婉拒或推进状态。
+- 每个人只能看到自己的余额；`profiles` 的 RLS 只放行 `user_id = auth.uid()`。
 - 任务与签到的日期周期以 `Asia/Shanghai` 为准（见 `src/lib/date.ts` 与 `public.app_today()`），前后端使用同一套周期键。
 
 ## 目录结构
