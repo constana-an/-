@@ -1,0 +1,18 @@
+{
+  "id": "/",
+  "name": "情侣点单小铺",
+  "short_name": "点单小铺",
+  "description": "只属于两个人的甜蜜点单小铺",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "lang": "zh-CN",
+  "background_color": "#fff6f8",
+  "theme_color": "#fff6f8",
+  "icons": [
+    { "src": "/assets/app-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/app-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/app-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
