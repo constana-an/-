@@ -158,13 +158,13 @@ as $$
     end as day
   ),
   run as (
-    select c.checked_on, row_number() over (order by c.checked_on desc) as position
+    select c.checked_on, row_number() over (order by c.checked_on desc) as rn
     from public.daily_checkins c, anchor a
     where c.user_id = p_user_id and c.checked_on <= a.day
   )
   select coalesce(count(*)::integer, 0)
   from run, anchor a
-  where run.checked_on = a.day - (run.position - 1)::integer;
+  where run.checked_on = a.day - (run.rn - 1)::integer;
 $$;
 
 create or replace function public.daily_checkin()
