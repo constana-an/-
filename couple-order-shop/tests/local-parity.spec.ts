@@ -226,3 +226,34 @@ test("the timeline keeps every finished wish, grouped by month", async ({ page }
   await expect(page.locator(".memory-timeline li", { hasText: "心愿 0" })).toBeVisible();
   await expect(page.locator(".timeline-month h4")).toHaveCount(2);
 });
+
+test("earlier milestones stay readable after the toast is gone", async ({ page }) => {
+  // 100 days in with a finished wish: 相爱 100 天 and 第一个心愿 both passed.
+  const done = {
+    id: "seed-done", itemId: "fruit-tea", itemName: "缤纷水果茶",
+    image: "/assets/menu/fruit-tea.png", price: 28, note: "", desiredTime: "尽快",
+    from: "大宝", to: "二宝", status: "done",
+    createdAt: "2026-08-01T10:00:00.000Z", completedAt: "2026-08-01T12:00:00.000Z",
+  };
+  await enterAs(page, "大宝", {
+    "couple-shop-orders": JSON.stringify([done]),
+    "couple-shop-profile": JSON.stringify({
+      shopName: "我们的小铺", firstName: "大宝", secondName: "二宝", startedOn: shopDay(-100),
+    }),
+    // Already congratulated, so nothing pops: the history has to stand alone.
+    "couple-shop-milestones:大宝": JSON.stringify(["wishes-1", "days-100"]),
+  });
+  await page.getByRole("button", { name: "回忆", exact: true }).click();
+
+  const card = page.locator(".milestone-card");
+  // Only one milestone headlines the card; the other is out of sight entirely.
+  await expect(card.getByText("第一个心愿完成了")).toBeVisible();
+  await expect(card.getByText("相爱 100 天")).toHaveCount(0);
+
+  await card.getByRole("button", { name: /看看走过的 2 个里程碑/ }).click();
+  await expect(card.getByText("相爱 100 天")).toBeVisible();
+  await expect(card.locator(".milestone-history li")).toHaveCount(2);
+
+  await card.getByRole("button", { name: "收起" }).click();
+  await expect(card.locator(".milestone-history")).toHaveCount(0);
+});

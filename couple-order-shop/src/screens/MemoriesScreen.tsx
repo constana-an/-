@@ -53,6 +53,7 @@ export function MemoriesScreen({
   onWriteWish: () => void;
 }) {
   const [timelineLimit, setTimelineLimit] = useState(TIMELINE_PAGE);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const done = orders.filter((order) => order.status === "done");
   // The hero counts this calendar month; the all-time total gets its own tile so
   // the two numbers can never be mistaken for each other.
@@ -68,7 +69,10 @@ export function MemoriesScreen({
   // to have arrived at, and a place to be heading.
   const counts = { days, wishes: done.length, streak: checkin.streak };
   const reached = reachedMilestones(counts);
-  const latest = reached[reached.length - 1] ?? null;
+  // Headline is the last one the catalogue lists, not the most recently earned:
+  // days, wishes and streaks cross their thresholds on their own schedules and
+  // nothing records when. The history below is the complete answer.
+  const headline = reached[reached.length - 1] ?? null;
   const upcoming = nextMilestone(counts);
   // Finished wishes are the couple's own history and need no curation: newest
   // first, straight from the order list. The album on top is for the photos
@@ -93,23 +97,38 @@ export function MemoriesScreen({
     <section className="page-section memory-page">
       <div className="memory-hero"><span>{monthLabel}的小小幸福</span><strong>{doneThisMonth.length}</strong><p>件这个月一起完成的心愿</p><div className="avatar-pair"><span>{profile.firstName.slice(0, 1)}</span><span>{profile.secondName.slice(0, 1)}</span></div></div>
       <div className="stats-row"><div><HeartFilledIcon /><strong>{days}</strong><span>相爱天数</span></div><div><StarFilledIcon /><strong>{done.length}</strong><span>累计完成</span></div><div><CalendarIcon /><strong>{startedLabel}</strong><span>开始日期</span></div></div>
-      {(latest || upcoming) && (
+      {(headline || upcoming) && (
         <section className="milestone-card" aria-label="里程碑">
-          {latest ? (
-            <div className="milestone-reached">
-              <span className="milestone-badge"><StarFilledIcon /></span>
-              <div><strong>{latest.title}</strong><p>{latest.body}</p></div>
-            </div>
-          ) : (
-            <div className="milestone-reached">
-              <span className="milestone-badge"><StarFilledIcon /></span>
-              <div><strong>还没有里程碑</strong><p>完成第一个心愿，这里就会记下第一笔。</p></div>
-            </div>
-          )}
+          <div className="milestone-reached">
+            <span className="milestone-badge"><StarFilledIcon /></span>
+            {headline
+              ? <div><strong>{headline.title}</strong><p>{headline.body}</p></div>
+              : <div><strong>还没有里程碑</strong><p>完成第一个心愿，这里就会记下第一笔。</p></div>}
+          </div>
           {upcoming && (
             <p className="milestone-next">
               再 {upcoming.remaining} {milestoneUnit[upcoming.milestone.kind]}，就是「{upcoming.milestone.title}」
             </p>
+          )}
+          {/* The celebration toast is gone in two seconds and the card only
+              keeps the newest one, so everything earned before today had
+              nowhere to be looked at. */}
+          {reached.length > 1 && (
+            <>
+              <button className="milestone-toggle" aria-expanded={historyOpen} onClick={() => setHistoryOpen((open) => !open)}>
+                {historyOpen ? "收起" : `看看走过的 ${reached.length} 个里程碑`}
+              </button>
+              {historyOpen && (
+                <ol className="milestone-history">
+                  {[...reached].reverse().map((milestone) => (
+                    <li key={milestone.id}>
+                      <strong>{milestone.title}</strong>
+                      <p>{milestone.body}</p>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </>
           )}
         </section>
       )}
