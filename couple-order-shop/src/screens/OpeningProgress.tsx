@@ -1,17 +1,21 @@
-import { CheckIcon } from "@radix-ui/react-icons";
-import { cloudEnabled } from "../lib/supabase";
+import { useState } from "react";
+import { CheckIcon, ChevronDownIcon } from "@radix-ui/react-icons";
 
 export type OpeningStep = { id: string; title: string; detail: string; done: boolean; action?: () => void; cta?: string };
 
 /**
- * The first run is the longest part of this app: choosing an identity is easy,
- * but a couple is not really open for business until they have an account, a
- * paired shop, notifications, and one wish actually sent. Each of those lived
- * on a different screen with nothing tying them together, so people stopped
- * after step one. This turns the whole thing into one visible checklist that
- * disappears the moment it is finished.
+ * One step at a time.
+ *
+ * This used to list every remaining step at once — account, pairing, install,
+ * notifications, first wish — all at the same weight, so the first run asked
+ * for six things and named none of them as the place to start. It also ate the
+ * top half of the shop, pushing the menu itself below the fold.
+ *
+ * Now it shows the next thing and nothing else, with the rest one tap away for
+ * anyone who wants to see how far there is to go.
  */
 export function OpeningProgress({ steps, onDismiss }: { steps: OpeningStep[]; onDismiss: () => void }) {
+  const [expanded, setExpanded] = useState(false);
   const done = steps.filter((step) => step.done).length;
   if (done === steps.length) return null;
   const next = steps.find((step) => !step.done)!;
@@ -19,21 +23,30 @@ export function OpeningProgress({ steps, onDismiss }: { steps: OpeningStep[]; on
   return (
     <section className="opening-progress" aria-label="开张进度">
       <div className="opening-head">
-        <div>
-          <span>开张进度 {done}/{steps.length}</span>
-          <strong>{cloudEnabled ? "再走几步，小铺就开张了" : "还差一步就开张了"}</strong>
-        </div>
+        <span>下一步 · 还差 {steps.length - done} 步开张</span>
         <button className="opening-skip" onClick={onDismiss}>以后再说</button>
       </div>
-      <ol className="opening-steps">
-        {steps.map((step) => (
-          <li key={step.id} className={step.done ? "is-done" : step.id === next.id ? "is-next" : ""}>
-            <span className="opening-tick">{step.done ? <CheckIcon /> : null}</span>
-            <div><strong>{step.title}</strong><small>{step.detail}</small></div>
-          </li>
-        ))}
-      </ol>
-      {next.action && <button className="opening-action" onClick={next.action}>{next.cta ?? next.title}</button>}
+
+      <strong className="opening-next-title">{next.title}</strong>
+      <small className="opening-next-detail">{next.detail}</small>
+      {next.action && (
+        <button className="opening-action" onClick={next.action}>{next.cta ?? next.title}</button>
+      )}
+
+      <button className="opening-toggle" aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>
+        {expanded ? "收起" : `看看全部 ${steps.length} 步`}
+        <ChevronDownIcon className={expanded ? "is-open" : ""} />
+      </button>
+      {expanded && (
+        <ol className="opening-steps">
+          {steps.map((step) => (
+            <li key={step.id} className={step.done ? "is-done" : step.id === next.id ? "is-next" : ""}>
+              <span className="opening-tick">{step.done ? <CheckIcon /> : null}</span>
+              <div><strong>{step.title}</strong><small>{step.detail}</small></div>
+            </li>
+          ))}
+        </ol>
+      )}
     </section>
   );
 }

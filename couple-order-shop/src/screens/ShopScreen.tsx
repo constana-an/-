@@ -13,6 +13,7 @@ export function ShopScreen({
   customItems,
   onAddCustom,
   onEditCustom,
+  coins,
 }: {
   category: Category;
   setCategory: (category: Category) => void;
@@ -24,6 +25,8 @@ export function ShopScreen({
   customItems: MenuItem[];
   onAddCustom: () => void;
   onEditCustom: (item: MenuItem) => void;
+  /** Spending power, so a wish out of reach says so before it is tapped. */
+  coins: number;
 }) {
   const activeMeta = categoryMeta.find((item) => item.id === category)!;
   // The couple's own wishes come first: they are the ones worth rediscovering.
@@ -69,8 +72,12 @@ export function ShopScreen({
         <div className="menu-list">
           {items.map((item) => {
             const used = Boolean(item.limited) && usedLimitedIds.includes(item.id);
+            // A new wallet holds 8 and the cheapest wish is 28, so most of the
+            // menu is out of reach on day one. Saying it here beats letting
+            // someone fill in a time and a note first.
+            const short = item.price - coins;
             return (
-              <article className={`menu-card ${used ? "is-used" : ""}`} key={item.id}>
+              <article className={`menu-card ${used ? "is-used" : ""} ${short > 0 ? "is-short" : ""}`.trim()} key={item.id}>
                 <div className="menu-art" style={{ background: item.tint }}><MenuArt item={item} /></div>
                 <div className="menu-copy">
                   <div className="menu-title-row">
@@ -85,7 +92,9 @@ export function ShopScreen({
                   <p>{item.description}</p>
                   <div className="price-meta">
                     <div className="price-pill"><HeartFilledIcon /> {item.price}</div>
-                    {used && <span>这张券已经用掉了</span>}
+                    {used
+                      ? <span>这张券已经用掉了</span>
+                      : short > 0 && <span className="price-short">还差 {short} 币</span>}
                   </div>
                 </div>
                 <button

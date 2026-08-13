@@ -244,3 +244,18 @@ test("a spent limited coupon stays visibly used", async ({ page }) => {
   await expect(card.getByText("已使用")).toBeVisible();
   await expect(card.getByRole("button", { name: /已使用/ })).toBeDisabled();
 });
+
+test("a wish beyond the wallet says so before the note is written", async ({ page }) => {
+  await startWithCoins(page, 8);
+
+  // Regression: every card looked orderable, and "甜心币不够啦" only arrived as
+  // a toast after picking a time and typing a message.
+  const card = page.locator(".menu-card", { hasText: "缤纷水果茶" });
+  await expect(card.getByText("还差 20 币")).toBeVisible();
+
+  await page.getByRole("button", { name: "加入缤纷水果茶" }).click();
+  await expect(page.getByText("还差 20 甜心币")).toBeVisible();
+  await expect(page.getByRole("button", { name: /确认下单/ })).toHaveCount(0);
+  // The sheet offers the way out rather than a dead end.
+  await expect(page.getByRole("button", { name: /去连接|去做任务赚币/ })).toBeVisible();
+});

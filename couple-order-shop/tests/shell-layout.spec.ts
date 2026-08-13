@@ -159,3 +159,28 @@ test("the design harness is still reachable, and only when asked for", async ({ 
   // The simulated phone is a design tool, not something a visitor stumbles into.
   await expect(page.getByTestId("device-screen")).toBeVisible();
 });
+
+test("each tab remembers its own scroll position, and never inherits another's", async ({ page }) => {
+  await enter(page);
+  const offset = () => page.evaluate(() =>
+    document.querySelector<HTMLElement>('[data-testid="app-scroll"]')!.scrollTop);
+  const go = (tab: string) => page.getByRole("button", { name: tab, exact: true }).click();
+
+  // Regression: all five tabs share one scroll container, so 小铺 opened
+  // wherever 任务 had been left — heading cut off, mid-menu.
+  await go("任务");
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('[data-testid="app-scroll"]')!.scrollTop = 600;
+  });
+  await page.waitForTimeout(200);
+  const before = await offset();
+  expect(before).toBeGreaterThan(0);
+
+  await go("小铺");
+  expect(await offset(), "a freshly opened tab must start at its own top").toBe(0);
+
+  // Coming back returns to exactly where that tab was, the way a native tab bar
+  // behaves — "somewhere greater than zero" would pass on a stale offset too.
+  await go("任务");
+  await expect(async () => expect(await offset()).toBe(before)).toPass({ timeout: 3000 });
+});

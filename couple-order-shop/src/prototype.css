@@ -631,3 +631,19 @@ button:focus-visible { outline: 3px solid rgba(240, 111, 148, .32); outline-offs
    is why the sheet's own `bottom` is driven by the keyboard height. */
 .sheet-overlay.app-sheet-overlay { position: fixed; }
 .bottom-sheet.app-sheet { position: fixed; }
+
+/* One step at a time: the checklist used to occupy the top half of the shop. */
+.opening-head { align-items: center; }
+.opening-next-title { display: block; margin-top: 10px; font-size: 15px; }
+.opening-next-detail { display: block; margin-top: 3px; color: #786f7b; font-size: 12px; line-height: 1.6; }
+.opening-toggle { width: 100%; min-height: 44px; margin-top: 8px; border: 0; display: flex; align-items: center; justify-content: center; gap: 5px; background: transparent; color: #785da3; font-size: 12px; font-weight: 700; }
+.opening-toggle svg { width: 13px; height: 13px; transition: transform .2s ease; }
+.opening-toggle svg.is-open { transform: rotate(180deg); }
+
+/* A wish beyond the wallet says so on the card, not after the note is written. */
+.menu-card.is-short .menu-art { opacity: .72; }
+.price-short { color: #b5506f; font-weight: 700; }
+.order-short { margin-top: 4px; padding: 14px 16px; border-radius: 18px; background: #fff5f7; text-align: center; }
+.order-short strong { display: block; color: #b5506f; font-size: 15px; }
+.order-short p { margin: 6px 0 12px; color: #7d6e75; font-size: 12px; line-height: 1.7; }
+.order-short .submit-order { margin: 0; }

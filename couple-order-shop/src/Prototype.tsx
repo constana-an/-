@@ -65,7 +65,7 @@ import type {
 } from "./lib/types";
 import { MemoriesScreen } from "./screens/MemoriesScreen";
 import { MenuArt } from "./screens/MenuArt";
-import { OnboardingSheet } from "./screens/OnboardingSheet";
+import { OnboardingSheet, PAIRING_BONUS } from "./screens/OnboardingSheet";
 import { OpeningProgress, type OpeningStep } from "./screens/OpeningProgress";
 import { OrdersScreen } from "./screens/OrdersScreen";
 import { OursScreen } from "./screens/OursScreen";
@@ -1725,7 +1725,7 @@ export default function Prototype() {
 
   return (
     <div className="app-shell">
-      <MobileScroll className="app-screen">
+      <MobileScroll className="app-screen" scrollKey={view}>
         <main className="screen-content couple-shop" aria-label="情侣点单小铺" onPointerDown={dismissKeyboardOnOutsideTap}>
           <header className="top-bar">
             <div className="brand-mark"><HeartFilledIcon /></div>
@@ -1766,6 +1766,7 @@ export default function Prototype() {
               customItems={customItems}
               onAddCustom={openAddWish}
               onEditCustom={openEditWish}
+              coins={coins}
             />
           )}
           {view === "tasks" && (
@@ -1864,7 +1865,27 @@ export default function Prototype() {
               <span>给对方的悄悄话</span>
               <KeyboardInput id="order-note" value={note} maxLength={160} onChange={(event) => setNote(event.target.value)} placeholder="例如：想和你一起慢慢吃" />
             </label>
-            <button className="submit-order" onClick={submitOrder}><HeartFilledIcon /> 确认下单 · {selected.price} 甜心币</button>
+            {selected.price > coins ? (
+              <div className="order-short">
+                <strong>还差 {selected.price - coins} 甜心币</strong>
+                <p>
+                  {cloudEnabled && !cloudCoupleId
+                    ? `和${partnerName}连上双人小铺，两个人各得 ${PAIRING_BONUS} 币，这份心愿马上就够。`
+                    : "做几个任务就能凑齐，任务每天零点刷新。"}
+                </p>
+                <button
+                  className="submit-order"
+                  onClick={() => {
+                    closeOrderSheet();
+                    setView(cloudEnabled && !cloudCoupleId ? "ours" : "tasks");
+                  }}
+                >
+                  {cloudEnabled && !cloudCoupleId ? `去连接${partnerName}` : "去做任务赚币"}
+                </button>
+              </div>
+            ) : (
+              <button className="submit-order" onClick={submitOrder}><HeartFilledIcon /> 确认下单 · {selected.price} 甜心币</button>
+            )}
           </div>
         )}
       </BottomSheet>

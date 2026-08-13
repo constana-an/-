@@ -82,6 +82,14 @@ test("the opening checklist carries the first run through to a real order", asyn
 
   const checklist = page.getByRole("region", { name: "开张进度" });
   await expect(checklist).toBeVisible();
+  // One action shows at a time — whichever is genuinely next — and the rest are
+  // a tap away. Which one that is depends on whether this build has cloud
+  // config, so assert the shape rather than a particular step.
+  await expect(checklist.getByText("下一步")).toBeVisible();
+  await expect(checklist.locator(".opening-next-title")).toBeVisible();
+  await expect(checklist.locator(".opening-steps li")).toHaveCount(0);
+
+  await checklist.getByRole("button", { name: /看看全部/ }).click();
   await expect(checklist.getByText("身份：大宝")).toBeVisible();
   await expect(checklist.getByText("送出第一个心愿")).toBeVisible();
 
@@ -142,6 +150,7 @@ test("the checklist never asks for a step this device cannot finish", async ({ p
 
   const checklist = page.locator(".opening-progress");
   await expect(checklist).toBeVisible();
+  await checklist.getByRole("button", { name: /看看全部/ }).click();
   // Offering it would leave the step permanently unticked, and the checklist
   // permanently on screen.
   await expect(checklist.getByText("开启消息通知")).toHaveCount(0);
@@ -159,6 +168,7 @@ test("installing is asked for before notifications, never after", async ({ page 
   await page.reload();
   await page.getByRole("button", { name: /我是大宝/ }).click();
 
+  await page.getByRole("button", { name: /看看全部/ }).click();
   // On iPhone `PushManager` only exists once the site is on the Home Screen, so
   // an "开启通知" step above "添加到主屏幕" is a step nobody can complete.
   const titles = await page.locator(".opening-steps li strong").allInnerTexts();
