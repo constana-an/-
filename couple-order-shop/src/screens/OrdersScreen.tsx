@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArchiveIcon, CameraIcon, CheckCircledIcon, CheckIcon, ClockIcon, Cross1Icon, HeartFilledIcon, ResetIcon } from "@radix-ui/react-icons";
 import { statusText } from "../lib/catalog";
 import { relativeTime } from "../lib/date";
-import { KeyboardInput, useKeyboard } from "../mobile";
+import { KeyboardInput, useKeyboard } from "../shell";
 import type { Order, OrderFilter, OrderStatus } from "../lib/types";
 import { MenuArt } from "./MenuArt";
 

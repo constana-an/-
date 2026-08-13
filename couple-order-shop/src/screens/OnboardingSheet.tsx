@@ -1,5 +1,5 @@
 import { HeartFilledIcon } from "@radix-ui/react-icons";
-import { BottomSheet } from "../mobile";
+import { BottomSheet } from "../shell";
 import { MENU, TASKS } from "../lib/catalog";
 import { OPENING_BALANCE } from "../lib/storage";
 import { cloudEnabled } from "../lib/supabase";

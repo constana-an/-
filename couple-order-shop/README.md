@@ -103,7 +103,8 @@ npm run dev
 - `src/Prototype.tsx` — 应用编排：状态、云同步、各种底部弹层。
 - `src/screens/` — 五个主页面与 `MenuArt`。
 - `src/lib/` — 纯逻辑：日期与周期键、菜单与任务目录、本地存储、错误文案、Supabase 懒加载。
-- `src/mobile/` — 受保护的手机运行时，除非明确要求改运行时，否则不要改动。
+- `src/shell/` — **真实手机外壳**：铺满视口、真键盘（`visualViewport`）、真安全区（`env()`）、原生滚动。app 实际跑的是这一套。
+- `src/mobile/` — 设计预览用的模拟 iPhone 框，只在 `?preview=1` 时按需加载。**它的模拟键盘和安全区都是近似值**，任何键盘/安全区结论必须在真机上确认。
 - `docs/design/` — 设计对比截图与视觉验收记录。
 
 ## 验证

@@ -1,6 +1,6 @@
 import { BellIcon, CardStackIcon, DownloadIcon, GearIcon, LinkBreak2Icon, LockClosedIcon, PaperPlaneIcon, PersonIcon, ReaderIcon } from "@radix-ui/react-icons";
 import type { User } from "@supabase/supabase-js";
-import { KeyboardInput } from "../mobile";
+import { KeyboardInput } from "../shell";
 import { formatStartedOn, relationshipDays } from "../lib/date";
 import { appleAuthEnabled, cloudEnabled, membershipEnabled, phoneAuthEnabled } from "../lib/supabase";
 import { displayNameFor } from "../lib/types";

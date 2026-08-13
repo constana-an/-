@@ -37,7 +37,7 @@ test("the first run explains the coin gap and hands over the first task", async 
   await expect(page.getByRole("dialog", { name: "这间小铺怎么开" })).toHaveCount(0);
 });
 
-test("the guide still opens inside the phone for a remembered identity", async ({ page }) => {
+test("the guide opens where it can be seen for a remembered identity", async ({ page }) => {
   await page.goto("/");
   await page.evaluate(() => {
     localStorage.clear();
@@ -45,15 +45,17 @@ test("the guide still opens inside the phone for a remembered identity", async (
   });
   await page.reload();
 
-  // Regression: opening the sheet during the first render portalled it outside
-  // the phone frame, because the screen element only exists after that commit.
+  // Regression: opening the sheet during the first render put it somewhere the
+  // reader could not see, because the container it mounts into did not exist
+  // until after that commit.
   await expect(page.getByRole("dialog", { name: "这间小铺怎么开" })).toBeVisible();
-  const insideScreen = await page.evaluate(() => {
-    const screen = document.querySelector('[data-testid="device-screen"]');
-    const sheet = document.querySelector('[data-testid="bottom-sheet"]');
-    return Boolean(screen && sheet && screen.contains(sheet));
-  });
-  expect(insideScreen).toBe(true);
+  // Where it comes to rest, not where the entrance animation has it right now.
+  const viewport = page.viewportSize()!;
+  await expect(async () => {
+    const sheet = (await page.getByTestId("bottom-sheet").boundingBox())!;
+    expect(sheet.y).toBeGreaterThanOrEqual(0);
+    expect(sheet.y + sheet.height).toBeLessThanOrEqual(viewport.height + 1);
+  }).toPass({ timeout: 4000 });
 });
 
 test("the first-run guide can be skipped and stays dismissed", async ({ page }) => {

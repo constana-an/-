@@ -20,7 +20,7 @@ import {
   ArchiveIcon,
   TrashIcon,
 } from "@radix-ui/react-icons";
-import { BottomSheet, KeyboardInput, MobileScroll, useKeyboard, useKeyboardInsets } from "./mobile";
+import { BottomSheet, KeyboardInput, MobileScroll, useKeyboard, useKeyboardInsets } from "./shell";
 import { DESIRED_TIMES, MENU, WISH_TEMPLATES, categoryMeta, earnedInWeek, reachedMilestones, statusText, taskClaimKey } from "./lib/catalog";
 import { dayKeyOf, formatStartedOn, isValidDateKey, normalizeDateInput, relationshipDays, todayKey } from "./lib/date";
 import { checkinStatusFrom, checkinStreak, dueAnniversaries } from "./lib/date";

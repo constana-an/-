@@ -9,6 +9,41 @@
   --line: rgba(227, 112, 145, 0.12);
 }
 
+/* ── Real-device shell ─────────────────────────────────────────────────────
+   The preview harness supplied --mobile-safe-area-height and a fixed-size
+   screen element. On a phone those come from the device itself: env() for the
+   home indicator, and 100dvh so the height follows Safari's collapsing URL bar
+   instead of overflowing behind it. */
+:root {
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+}
+.app-root {
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #fff8fa;
+  color: var(--ink);
+  font-family: "PingFang SC", "Hiragino Sans GB", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* The app owns its own scrolling; the document must never bounce behind it. */
+  overscroll-behavior: none;
+}
+.app-root .app-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Fixed chrome inside the shell is positioned against it, not the document. */
+.app-root .app-shell { position: relative; }
+.app-root .app-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+/* Content clears the notch itself, the way it did behind the simulated status bar. */
+.app-root .screen-content { padding-top: calc(var(--safe-area-top) + 12px); }
+.app-root { --mobile-safe-area-height: var(--safe-area-bottom); }
+
 .app-shell { height: 100%; background: #fff8fa; color: var(--ink); font-family: "PingFang SC", "Hiragino Sans GB", -apple-system, BlinkMacSystemFont, sans-serif; position: relative; overflow: hidden; }
 .app-screen { background: linear-gradient(180deg, #fff 0, #fff8fa 37%, #fff5f8 100%); }
 .couple-shop { min-height: 100%; padding: 62px 18px calc(var(--mobile-safe-area-height) + 102px); }
@@ -589,3 +624,10 @@ button:focus-visible { outline: 3px solid rgba(240, 111, 148, .32); outline-offs
 .milestone-history li { padding: 11px 13px; border-radius: 14px; background: rgba(255,255,255,.6); }
 .milestone-history strong { display: block; color: #8a6b3e; font-size: 12px; }
 .milestone-history p { margin: 4px 0 0; color: #a3835a; font-size: 11px; line-height: 1.65; }
+
+/* The harness portalled sheets into its simulated screen, where `absolute` met a
+   positioned ancestor. On a real device they portal to <body>, so they have to
+   be fixed to the viewport instead — and the viewport is the visual one, which
+   is why the sheet's own `bottom` is driven by the keyboard height. */
+.sheet-overlay.app-sheet-overlay { position: fixed; }
+.bottom-sheet.app-sheet { position: fixed; }

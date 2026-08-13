@@ -1,5 +1,5 @@
 import { CheckIcon, HeartFilledIcon, MagicWandIcon, Pencil1Icon, PlusIcon } from "@radix-ui/react-icons";
-import { Carousel } from "../mobile";
+import { Carousel } from "../shell";
 import { MENU, categoryMeta } from "../lib/catalog";
 import { savingHint } from "../lib/date";
 import type { Category, MenuItem } from "../lib/types";
