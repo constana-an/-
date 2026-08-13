@@ -10,8 +10,10 @@ import {
   HeartFilledIcon,
   HeartIcon,
   HomeIcon,
+  ImageIcon,
   LockClosedIcon,
   PaperPlaneIcon,
+  Pencil1Icon,
   PersonIcon,
   ReaderIcon,
   TargetIcon,
@@ -19,23 +21,30 @@ import {
   TrashIcon,
 } from "@radix-ui/react-icons";
 import { BottomSheet, KeyboardInput, MobileScroll, useKeyboard } from "./mobile";
-import { MENU, statusText, taskClaimKey } from "./lib/catalog";
-import { formatStartedOn, isValidDateKey, normalizeDateInput, todayKey } from "./lib/date";
-import { daysUntilAnniversary } from "./lib/date";
+import { DESIRED_TIMES, MENU, categoryMeta, statusText, taskClaimKey } from "./lib/catalog";
+import { dayKeyOf, formatStartedOn, isValidDateKey, normalizeDateInput, todayKey } from "./lib/date";
+import { checkinStatusFrom, checkinStreak, dueAnniversaries } from "./lib/date";
 import { authErrorMessage, orderErrorMessage, orderStatusErrorMessage, rewardErrorMessage } from "./lib/errors";
-import { cloudEnabled, getSupabase, type SupabaseClient } from "./lib/supabase";
+import { appleAuthEnabled, cloudEnabled, getSupabase, phoneAuthEnabled, type SupabaseClient } from "./lib/supabase";
 import {
+  CHECKIN_REWARD,
   DEFAULT_PROFILE,
   STORAGE_KEYS,
+  checkinsKey,
   claimsKey,
+  loadCheckinDays,
   loadCoupleProfile,
   loadEconomyCoins,
+  loadCustomItems,
   loadIdentity,
+  loadLocalAnniversaries,
   loadLocalOrders,
   loadTaskClaims,
+  pruneReminders,
+  remindedKey,
   walletKey,
 } from "./lib/storage";
-import { displayNameFor, partnerFor } from "./lib/types";
+import { CUSTOM_CATEGORIES, CUSTOM_PRICE_RANGE, IDENTITIES, displayNameFor, partnerFor } from "./lib/types";
 import type {
   Anniversary,
   AuthMode,
@@ -53,6 +62,8 @@ import type {
 } from "./lib/types";
 import { MemoriesScreen } from "./screens/MemoriesScreen";
 import { MenuArt } from "./screens/MenuArt";
+import { OnboardingSheet } from "./screens/OnboardingSheet";
+import { OpeningProgress, type OpeningStep } from "./screens/OpeningProgress";
 import { OrdersScreen } from "./screens/OrdersScreen";
 import { OursScreen } from "./screens/OursScreen";
 import { ShopScreen } from "./screens/ShopScreen";
@@ -65,7 +76,89 @@ const notificationsSupported = typeof window !== "undefined" && "Notification" i
 const SIGNED_URL_TTL_SECONDS = 3600;
 const SIGNED_URL_REFRESH_MS = 45 * 60 * 1000;
 
-type Wallet = { owner: Identity | null; coins: number; claims: string[] };
+/**
+ * Coins, claims, check-in days and their owner move as one value. Check-in days
+ * are personal — they pay into this identity's own wallet — so keeping them in a
+ * separate state slot would reintroduce the half-applied identity switch.
+ */
+type Wallet = { owner: Identity | null; coins: number; claims: string[]; checkins: string[] };
+
+const walletFor = (owner: Identity | null): Wallet => ({
+  owner,
+  coins: loadEconomyCoins(owner),
+  claims: loadTaskClaims(owner),
+  checkins: loadCheckinDays(owner),
+});
+
+/** Custom wishes carry no artwork, so the card tint is what distinguishes them. */
+const CUSTOM_TINTS: Record<Category, string> = {
+  food: "#fff0e5",
+  care: "#ffe3ef",
+  date: "#e5f6ee",
+  limited: "#e1f3ff",
+};
+
+const customItemFrom = (row: { id: string; category: Category; name: string; description: string; price: number }): MenuItem => ({
+  id: row.id,
+  category: row.category,
+  name: row.name,
+  description: row.description,
+  price: row.price,
+  tint: CUSTOM_TINTS[row.category],
+  custom: true,
+});
+
+type PushState = { permission: NotificationPermission | "unsupported"; subscribed: boolean };
+
+const vapidPublicKey = () => (import.meta.env.VITE_WEB_PUSH_PUBLIC_KEY as string | undefined) || undefined;
+
+/** VAPID keys travel base64url; `atob` needs plain base64 with its padding. */
+function applicationServerKey(key: string): Uint8Array<ArrayBuffer> {
+  const padded = key + "=".repeat((4 - (key.length % 4)) % 4);
+  const raw = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+  const bytes = new Uint8Array(new ArrayBuffer(raw.length));
+  for (let index = 0; index < raw.length; index += 1) bytes[index] = raw.charCodeAt(index);
+  return bytes;
+}
+
+async function saveSubscription(client: SupabaseClient, subscription: PushSubscription, coupleId: string, userId: string) {
+  const json = subscription.toJSON();
+  await client.from("push_subscriptions").upsert(
+    { user_id: userId, couple_id: coupleId, endpoint: json.endpoint, p256dh: json.keys?.p256dh, auth: json.keys?.auth },
+    { onConflict: "endpoint" },
+  );
+}
+
+/**
+ * Picks up a subscription the worker rotated while no page was open: retire the
+ * old row, record the new endpoint. The worker cannot do this itself — writing
+ * to the couple's table needs a session it does not have.
+ */
+async function drainPushRotation(client: SupabaseClient, coupleId: string, userId: string) {
+  const cache = await caches.open("couple-shop-push");
+  const parked = await cache.match("/__push-rotation");
+  if (!parked) return;
+  const { old, next } = await parked.json() as { old: string | null; next: { endpoint?: string; keys?: { p256dh?: string; auth?: string } } };
+  if (old) await client.from("push_subscriptions").delete().eq("endpoint", old);
+  if (next?.endpoint) {
+    await client.from("push_subscriptions").upsert(
+      { user_id: userId, couple_id: coupleId, endpoint: next.endpoint, p256dh: next.keys?.p256dh, auth: next.keys?.auth },
+      { onConflict: "endpoint" },
+    );
+  }
+  await cache.delete("/__push-rotation");
+}
+
+/** Drops this device's subscription, on the server and in the browser. */
+async function dropSubscription(client: SupabaseClient | null) {
+  if (!("serviceWorker" in navigator)) return;
+  const registration = await navigator.serviceWorker.getRegistration();
+  const subscription = await registration?.pushManager.getSubscription();
+  if (!subscription) return;
+  // Delete only this endpoint: the same account may be signed in elsewhere.
+  if (client) await client.from("push_subscriptions").delete().eq("endpoint", subscription.endpoint);
+  await subscription.unsubscribe().catch(() => undefined);
+}
 
 function newId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -94,12 +187,7 @@ export default function Prototype() {
   const [view, setView] = useState<MainView>("shop");
   const [category, setCategory] = useState<Category>("food");
   const [orders, setOrders] = useState<Order[]>(loadLocalOrders);
-  // Coins, claims and their owner move as one value: a half-applied identity
-  // switch would otherwise write one person's balance into the other's wallet.
-  const [wallet, setWallet] = useState<Wallet>(() => {
-    const owner = loadIdentity();
-    return { owner, coins: loadEconomyCoins(owner), claims: loadTaskClaims(owner) };
-  });
+  const [wallet, setWallet] = useState<Wallet>(() => walletFor(loadIdentity()));
   const coins = wallet.coins;
   const claimedTasks = wallet.claims;
   const setCoins = useCallback((next: number | ((current: number) => number)) => {
@@ -108,13 +196,26 @@ export default function Prototype() {
   const setClaimedTasks = useCallback((next: string[] | ((current: string[]) => string[])) => {
     setWallet((current) => ({ ...current, claims: typeof next === "function" ? next(current.claims) : next }));
   }, []);
+  const [customItems, setCustomItems] = useState<MenuItem[]>(loadCustomItems);
+  const [wishOpen, setWishOpen] = useState(false);
+  const [wishDraft, setWishDraft] = useState<{ name: string; description: string; price: string; category: Category }>(
+    { name: "", description: "", price: "48", category: "food" },
+  );
+  const [editingWishId, setEditingWishId] = useState<string | null>(null);
   const [selected, setSelected] = useState<MenuItem | null>(null);
   const [note, setNote] = useState("");
-  const [time, setTime] = useState("今晚 20:30");
+  const [time, setTime] = useState<string>(DESIRED_TIMES[0]);
+  const [focusOrderId, setFocusOrderId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(
-    () => notificationsSupported && Notification.permission === "granted",
-  );
+  // `subscribed` means this device really can be pushed to: a browser
+  // subscription exists *and* the couple's table has a row for it. Permission
+  // alone was what let the settings row claim "订单不会错过" on a device with
+  // no subscription at all.
+  const [pushState, setPushState] = useState<PushState>(() => ({
+    permission: notificationsSupported ? Notification.permission : "unsupported",
+    subscribed: false,
+  }));
+  const [pushRotation, setPushRotation] = useState(0);
   const [cloudCoupleId, setCloudCoupleId] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.cloudId));
   const [inviteCode, setInviteCode] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.inviteCode));
   const [pairingCode, setPairingCode] = useState("");
@@ -134,15 +235,28 @@ export default function Prototype() {
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [dangerConfirm, setDangerConfirm] = useState<"leave" | "delete" | null>(null);
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
-  const [anniversaries, setAnniversaries] = useState<Anniversary[]>([]);
+  const [anniversaries, setAnniversaries] = useState<Anniversary[]>(loadLocalAnniversaries);
   const [checkin, setCheckin] = useState<CheckinStatus>({ streak: 0, checkedToday: false });
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [memoryCaption, setMemoryCaption] = useState("");
   const [memoryDate, setMemoryDate] = useState(todayKey());
   const [memoryFile, setMemoryFile] = useState<File | null>(null);
+  // Set while the memory sheet edits an existing entry instead of adding one.
+  const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+  const [memoryDetail, setMemoryDetail] = useState<MemoryEntry | null>(null);
   const [anniversaryOpen, setAnniversaryOpen] = useState(false);
   const [anniversaryTitle, setAnniversaryTitle] = useState("");
   const [anniversaryDate, setAnniversaryDate] = useState(todayKey());
+  const [anniversaryRepeats, setAnniversaryRepeats] = useState(true);
+  const [anniversaryReminder, setAnniversaryReminder] = useState(3);
+  const [editingAnniversaryId, setEditingAnniversaryId] = useState<string | null>(null);
+  // Deleting a memory or an anniversary is not undoable and not synced back, so
+  // both ask once inside the sheet that is already open.
+  const [confirmDelete, setConfirmDelete] = useState<"memory" | "anniversary" | "wish" | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [openingDismissed, setOpeningDismissed] = useState(
+    () => localStorage.getItem(STORAGE_KEYS.openingDismissed) === "1",
+  );
   const [membership, setMembership] = useState<MembershipState>({ planName: "基础版", status: "active" });
   const toastTimer = useRef<number | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -160,7 +274,9 @@ export default function Prototype() {
   );
   const usedLimitedIds = useMemo(() => {
     const limited = new Set(MENU.filter((item) => item.limited).map((item) => item.id));
-    return [...new Set(orders.filter((order) => order.status !== "rejected" && limited.has(order.itemId)).map((order) => order.itemId))];
+    // Declining or withdrawing releases the coupon; anything else holds it.
+    const released = new Set<OrderStatus>(["rejected", "cancelled"]);
+    return [...new Set(orders.filter((order) => !released.has(order.status) && limited.has(order.itemId)).map((order) => order.itemId))];
   }, [orders]);
   const identityOptions: Array<{ name: Identity; displayName: string; tone: "pink" | "mint" }> = [
     { name: "大宝", displayName: profile.firstName, tone: "pink" },
@@ -178,8 +294,58 @@ export default function Prototype() {
   const closeOrderSheet = () => { keyboard.hide(); setSelected(null); };
   const closeSettings = () => { keyboard.hide(); setSettingsOpen(false); };
   const closeAuth = () => { keyboard.hide(); setAuthOpen(false); };
-  const closeMemory = () => { keyboard.hide(); setMemoryOpen(false); };
-  const closeAnniversary = () => { keyboard.hide(); setAnniversaryOpen(false); };
+  const closeWish = () => { keyboard.hide(); setWishOpen(false); setEditingWishId(null); setConfirmDelete(null); };
+  const closeMemory = () => { keyboard.hide(); setMemoryOpen(false); setEditingMemoryId(null); };
+  const closeMemoryDetail = () => { setMemoryDetail(null); setConfirmDelete(null); };
+  const closeAnniversary = () => { keyboard.hide(); setAnniversaryOpen(false); setEditingAnniversaryId(null); setConfirmDelete(null); };
+
+  const openAddMemory = () => {
+    setEditingMemoryId(null);
+    setMemoryCaption("");
+    setMemoryDate(todayKey());
+    setMemoryFile(null);
+    setMemoryOpen(true);
+  };
+  /** Turns a finished wish into the start of a photo memory. */
+  const keepOrderAsMemory = (order: Order) => {
+    if (!cloudCoupleId) return requirePairedForPhotos();
+    setEditingMemoryId(null);
+    setMemoryCaption(order.itemName);
+    setMemoryDate(dayKeyOf(order.completedAt ?? order.createdAt) ?? todayKey());
+    setMemoryFile(null);
+    setMemoryOpen(true);
+  };
+
+  const openEditMemory = (memory: MemoryEntry) => {
+    setEditingMemoryId(memory.id);
+    setMemoryCaption(memory.caption);
+    setMemoryDate(memory.happenedOn);
+    setMemoryFile(null);
+    setMemoryDetail(null);
+    setMemoryOpen(true);
+  };
+  const openAddAnniversary = () => {
+    setEditingAnniversaryId(null);
+    setAnniversaryTitle("");
+    setAnniversaryDate(todayKey());
+    setAnniversaryRepeats(true);
+    setAnniversaryReminder(3);
+    setAnniversaryOpen(true);
+  };
+  const openEditAnniversary = (item: Anniversary) => {
+    setEditingAnniversaryId(item.id);
+    setAnniversaryTitle(item.title);
+    setAnniversaryDate(item.eventDate);
+    setAnniversaryRepeats(item.repeatsYearly);
+    setAnniversaryReminder(item.reminderDays);
+    setAnniversaryOpen(true);
+  };
+
+  const finishOnboarding = (goToTasks: boolean) => {
+    localStorage.setItem(STORAGE_KEYS.onboarded, "1");
+    setOnboardingOpen(false);
+    if (goToTasks) setView("tasks");
+  };
 
   const chooseIdentity = useCallback((nextIdentity: Identity) => {
     localStorage.setItem(STORAGE_KEYS.identity, nextIdentity);
@@ -191,12 +357,79 @@ export default function Prototype() {
     if (pending) pending.then(setSupabase).catch(() => showToast("云服务加载失败，已切换到本地模式"));
   }, [showToast]);
 
+  /** Invokes the push function and reports what actually happened, or null. */
+  const notifyPartner = useCallback(async (client: SupabaseClient, orderId: string, event: string) => {
+    const { data, error } = await client.functions.invoke("notify-partner", { body: { orderId, event } });
+    if (error || !data) return null;
+    return data as { subscribed: number; delivered: number; pruned: number };
+  }, []);
+
+  // Keeps `subscribed` honest, and finishes the job when the user allowed
+  // notifications before pairing — the subscription needs a couple to belong to,
+  // so back then it was silently skipped and never retried.
+  useEffect(() => {
+    if (pushState.permission !== "granted" || !("serviceWorker" in navigator)) return;
+    let active = true;
+    void (async () => {
+      // Not `.ready`: the worker is only registered in PROD, so that promise
+      // never settles in dev or under Playwright.
+      const registration = await navigator.serviceWorker.getRegistration();
+      const client = cloudCoupleId ? await getSupabase() : null;
+      if (!active || !registration) return;
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription && client && cloudCoupleId && authUser && vapidPublicKey()) {
+        subscription = await registration.pushManager
+          .subscribe({ userVisibleOnly: true, applicationServerKey: applicationServerKey(vapidPublicKey()!) })
+          .catch(() => null);
+      }
+      if (!active) return;
+      if (!subscription || !client || !cloudCoupleId || !authUser) {
+        setPushState((current) => (current.subscribed ? { ...current, subscribed: false } : current));
+        return;
+      }
+      await drainPushRotation(client, cloudCoupleId, authUser.id).catch(() => undefined);
+      await saveSubscription(client, subscription, cloudCoupleId, authUser.id);
+      if (active) setPushState((current) => (current.subscribed ? current : { ...current, subscribed: true }));
+    })();
+    return () => { active = false; };
+  }, [pushState.permission, cloudCoupleId, authUser, pushRotation]);
+
+  // The worker tells every open page when the push service rotated the endpoint.
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === "push-subscription-changed") setPushRotation((count) => count + 1);
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, []);
+
+  // Opening the guide during the first render would portal it outside the phone
+  // frame: the screen element a sheet mounts into only exists after that first
+  // commit. Waiting for an identity is also what makes the copy addressable.
+  useEffect(() => {
+    if (!identity || localStorage.getItem(STORAGE_KEYS.onboarded) === "1") return;
+    setOnboardingOpen(true);
+  }, [identity]);
+
   useEffect(() => {
     const { view: deepView, orderId } = readDeepLink();
     if (!deepView && !orderId) return;
     setView(deepView ?? "orders");
+    // The order may not have loaded from the cloud yet, so hold the id until
+    // the list can act on it rather than dropping it here.
+    if (orderId) setFocusOrderId(orderId);
     window.history.replaceState(null, "", window.location.pathname);
   }, []);
+
+  // A stale focus must not fire minutes later when the tab comes back. Only on
+  // an actual departure: on mount `view` is still "shop" while the deep-link
+  // effect above is switching it, which would clear the id before it is used.
+  const previousView = useRef(view);
+  useEffect(() => {
+    if (previousView.current === "orders" && view !== "orders") setFocusOrderId(null);
+    previousView.current = view;
+  }, [view]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -283,9 +516,7 @@ export default function Prototype() {
   // Switching identity on this device swaps to that person's wallet.
   useEffect(() => {
     if (!identity || cloudCoupleId) return;
-    setWallet((current) => (current.owner === identity
-      ? current
-      : { owner: identity, coins: loadEconomyCoins(identity), claims: loadTaskClaims(identity) }));
+    setWallet((current) => (current.owner === identity ? current : walletFor(identity)));
   }, [identity, cloudCoupleId]);
 
   useEffect(() => {
@@ -296,10 +527,19 @@ export default function Prototype() {
         applyingBroadcast.current = true;
         setOrders(event.data.orders);
         if (event.data.profile) setProfile(event.data.profile);
+        if (event.data.customItems) setCustomItems(event.data.customItems);
+        // Anniversaries belong to the couple, so both identities take them.
+        if (event.data.anniversaries) setAnniversaries(event.data.anniversaries);
         // A wallet only ever accepts an update addressed to its own owner.
         if (event.data.walletOwner && event.data.walletOwner === identity) {
-          setCoins(event.data.coins);
-          if (event.data.claimedTasks) setClaimedTasks(event.data.claimedTasks);
+          setWallet((current) => (current.owner === identity
+            ? {
+              ...current,
+              coins: event.data.coins,
+              claims: event.data.claimedTasks ?? current.claims,
+              checkins: event.data.checkins ?? current.checkins,
+            }
+            : current));
         }
       }
     };
@@ -316,9 +556,16 @@ export default function Prototype() {
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.orders, JSON.stringify(orders));
+    // In cloud mode the custom menu belongs to the server; writing it here would
+    // leak one couple's wishes into this device's local-only shop.
+    if (!cloudCoupleId) {
+      localStorage.setItem(STORAGE_KEYS.customItems, JSON.stringify(customItems));
+      localStorage.setItem(STORAGE_KEYS.anniversaries, JSON.stringify(anniversaries));
+    }
     if (wallet.owner && !cloudCoupleId) {
       localStorage.setItem(walletKey(wallet.owner), String(wallet.coins));
       localStorage.setItem(claimsKey(wallet.owner), JSON.stringify(wallet.claims));
+      localStorage.setItem(checkinsKey(wallet.owner), JSON.stringify(wallet.checkins));
     }
     if (applyingBroadcast.current) {
       applyingBroadcast.current = false;
@@ -329,16 +576,19 @@ export default function Prototype() {
         type: "sync",
         orders,
         profile,
+        customItems,
+        anniversaries,
         walletOwner: wallet.owner,
         coins: wallet.coins,
         claimedTasks: wallet.claims,
+        checkins: wallet.checkins,
       });
     }
-  }, [orders, wallet, profile, cloudCoupleId]);
+  }, [orders, wallet, profile, customItems, anniversaries, cloudCoupleId]);
 
   const signMemoryRows = useCallback(async (
     client: SupabaseClient,
-    rows: Array<{ id: string; caption: string; happened_on: string; image_path: string | null; created_at: string }>,
+    rows: Array<{ id: string; caption: string; happened_on: string; image_path: string | null; created_at: string; created_by: string }>,
   ): Promise<MemoryEntry[]> => {
     const paths = rows.map((row) => row.image_path).filter((path): path is string => Boolean(path));
     const signed = new Map<string, string>();
@@ -356,13 +606,14 @@ export default function Prototype() {
       imagePath: row.image_path ?? undefined,
       imageUrl: row.image_path ? signed.get(row.image_path) : undefined,
       createdAt: row.created_at,
+      createdBy: row.created_by,
     }));
   }, []);
 
   const loadMemories = useCallback(async (client: SupabaseClient, coupleId: string) => {
     const { data } = await client
       .from("memory_entries")
-      .select("id, caption, happened_on, image_path, created_at")
+      .select("id, caption, happened_on, image_path, created_at, created_by")
       .eq("couple_id", coupleId)
       .order("happened_on", { ascending: false });
     if (data) setMemories(await signMemoryRows(client, data));
@@ -374,6 +625,7 @@ export default function Prototype() {
       id: row.id,
       itemId: row.item_id,
       itemName: row.item_name,
+      itemCategory: row.item_category ?? undefined,
       image: row.image_url ?? undefined,
       price: row.price,
       note: row.note ?? "",
@@ -383,6 +635,8 @@ export default function Prototype() {
       from: row.from_name,
       to: row.to_name,
       createdBy: row.created_by,
+      completedAt: row.completed_at ?? undefined,
+      declineNote: row.decline_note ?? undefined,
     })));
   }, []);
 
@@ -405,6 +659,15 @@ export default function Prototype() {
       secondName: data.partner_b_name || DEFAULT_PROFILE.secondName,
       startedOn: data.started_on || DEFAULT_PROFILE.startedOn,
     });
+  }, []);
+
+  const loadCustomWishes = useCallback(async (client: SupabaseClient, coupleId: string) => {
+    const { data } = await client
+      .from("custom_menu_items")
+      .select("id, category, name, description, price")
+      .eq("couple_id", coupleId)
+      .order("created_at");
+    if (data) setCustomItems(data.map(customItemFrom));
   }, []);
 
   const loadAnniversaries = useCallback(async (client: SupabaseClient, coupleId: string) => {
@@ -437,6 +700,7 @@ export default function Prototype() {
         loadMyBalance(client),
         loadMemories(client, coupleId),
         loadAnniversaries(client, coupleId),
+        loadCustomWishes(client, coupleId),
       ]);
       if (!active) return;
       // Task claims are per person: each partner earns their own rewards.
@@ -479,12 +743,15 @@ export default function Prototype() {
       .on("postgres_changes", { event: "*", schema: "public", table: "anniversaries", filter: `couple_id=eq.${coupleId}` }, () => {
         void loadAnniversaries(client, coupleId);
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "custom_menu_items", filter: `couple_id=eq.${coupleId}` }, () => {
+        void loadCustomWishes(client, coupleId);
+      })
       .subscribe();
     return () => {
       active = false;
       client.removeChannel(channel);
     };
-  }, [supabase, cloudCoupleId, authUser, loadOrders, loadCouple, loadMyBalance, loadMemories, loadAnniversaries, setClaimedTasks]);
+  }, [supabase, cloudCoupleId, authUser, loadOrders, loadCouple, loadMyBalance, loadMemories, loadAnniversaries, loadCustomWishes, setClaimedTasks]);
 
   // Signed photo links expire after an hour; refresh them when the album is
   // opened again or the app returns to the foreground.
@@ -502,26 +769,42 @@ export default function Prototype() {
     return () => document.removeEventListener("visibilitychange", refreshIfStale);
   }, [supabase, cloudCoupleId, view, memories, loadMemories]);
 
+  // Every anniversary inside its own window is announced, not just the soonest.
+  // The dependency is a signature rather than the array: `loadAnniversaries`
+  // builds a fresh one on every realtime event, which used to re-arm the timer.
+  const dueSignature = dueAnniversaries(anniversaries).map((entry) => `${entry.item.id}:${entry.days}`).join("|");
+  const anniversariesRef = useRef(anniversaries);
+  anniversariesRef.current = anniversaries;
+
   useEffect(() => {
-    const upcoming = [...anniversaries]
-      .map((item) => ({ item, days: daysUntilAnniversary(item.eventDate, item.repeatsYearly) }))
-      .filter(({ item, days }) => days <= item.reminderDays)
-      .sort((a, b) => a.days - b.days)[0];
-    if (!upcoming) return;
-    const reminderKey = `couple-shop-reminded:${upcoming.item.id}:${todayKey()}`;
-    if (localStorage.getItem(reminderKey)) return;
-    localStorage.setItem(reminderKey, "1");
+    if (!dueSignature) return;
+    pruneReminders();
+    const today = todayKey();
+    const pending = dueAnniversaries(anniversariesRef.current)
+      .filter((entry) => !localStorage.getItem(remindedKey(entry.item.id, today)));
+    if (pending.length === 0) return;
+    const describe = (entry: { item: Anniversary; days: number }) =>
+      (entry.days === 0 ? `今天是「${entry.item.title}」` : `「${entry.item.title}」还有 ${entry.days} 天`);
     const timer = window.setTimeout(() => {
-      const message = upcoming.days === 0 ? `今天是「${upcoming.item.title}」` : `「${upcoming.item.title}」还有 ${upcoming.days} 天`;
-      showToast(message);
-      if (notificationsSupported && Notification.permission === "granted" && "serviceWorker" in navigator) {
-        navigator.serviceWorker.ready
-          .then((registration) => registration.showNotification("纪念日提醒 💕", { body: message, icon: "/assets/app-icon.png" }))
-          .catch(() => undefined);
+      const headline = pending.slice(0, 2).map(describe).join("；");
+      showToast(pending.length > 2 ? `${headline}，等 ${pending.length} 个纪念日` : headline);
+      for (const entry of pending) {
+        // Marked only once the reminder has actually gone out: writing the key
+        // up front meant any re-render inside the delay ate it for the day.
+        localStorage.setItem(remindedKey(entry.item.id, today), "1");
+        if (notificationsSupported && Notification.permission === "granted" && "serviceWorker" in navigator) {
+          void navigator.serviceWorker.getRegistration()
+            .then((registration) => registration?.showNotification("纪念日提醒 💕", {
+              body: describe(entry),
+              icon: "/assets/app-icon.png",
+              tag: `anniversary:${entry.item.id}`,
+            }))
+            .catch(() => undefined);
+        }
       }
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [anniversaries, showToast]);
+  }, [dueSignature, showToast]);
 
   const clearCloudLocalState = () => {
     localStorage.removeItem(STORAGE_KEYS.cloudId);
@@ -531,10 +814,12 @@ export default function Prototype() {
     setInviteCode(null);
     setOrders([]);
     // Back to local mode: fall back to this identity's on-device wallet.
-    setWallet({ owner: identity, coins: loadEconomyCoins(identity), claims: loadTaskClaims(identity) });
+    setWallet(walletFor(identity));
     setMemories([]);
-    setAnniversaries([]);
+    setAnniversaries(loadLocalAnniversaries());
+    setCustomItems(loadCustomItems());
     setCheckin({ streak: 0, checkedToday: false });
+    setPushState((current) => ({ ...current, subscribed: false }));
   };
 
   const openAccount = () => {
@@ -617,6 +902,9 @@ export default function Prototype() {
   const signOut = async () => {
     const client = await getSupabase();
     if (!client) return;
+    // Before signing out, while the session can still delete the row: otherwise
+    // this phone keeps receiving that couple's pushes forever.
+    await dropSubscription(client);
     await client.auth.signOut();
     clearCloudLocalState();
     closeAuth();
@@ -625,7 +913,25 @@ export default function Prototype() {
 
   const exportData = async () => {
     try {
-      let payload: Record<string, unknown> = { exportedAt: new Date().toISOString(), formatVersion: 2, profile, coins, orders, claimedTasks, memories, anniversaries };
+      // Both wallets, not just the one in use: the other identity's balance and
+      // claims live on this device too, and the couple's own wishes are the
+      // only content a local-only shop has beyond its orders.
+      let payload: Record<string, unknown> = {
+        exportedAt: new Date().toISOString(),
+        formatVersion: 3,
+        profile,
+        identity,
+        orders,
+        customItems,
+        memories,
+        anniversaries,
+        wallets: IDENTITIES.map((who) => ({
+          identity: who,
+          coins: who === wallet.owner ? wallet.coins : loadEconomyCoins(who),
+          claimedTasks: who === wallet.owner ? wallet.claims : loadTaskClaims(who),
+          checkins: who === wallet.owner ? wallet.checkins : loadCheckinDays(who),
+        })),
+      };
       const client = cloudCoupleId ? await getSupabase() : null;
       if (client && cloudCoupleId) {
         const [coupleData, walletData, orderData, taskData, memoryData, anniversaryData, checkinData, auditData] = await Promise.all([
@@ -640,8 +946,9 @@ export default function Prototype() {
         ]);
         payload = {
           exportedAt: new Date().toISOString(),
-          formatVersion: 2,
+          formatVersion: 3,
           couple: coupleData.data,
+          customItems,
           myWallet: walletData.data,
           orders: orderData.data,
           taskClaims: taskData.data,
@@ -651,9 +958,9 @@ export default function Prototype() {
           auditLog: auditData.data,
         };
       }
-      const file = new File([JSON.stringify(payload, null, 2)], `情侣小铺备份-${todayKey()}.json`, { type: "application/json" });
+      const file = new File([JSON.stringify(payload, null, 2)], `情侣小铺数据-${todayKey()}.json`, { type: "application/json" });
       const shareNavigator = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
-      if (navigator.share && shareNavigator.canShare?.({ files: [file] })) await navigator.share({ title: "情侣小铺数据备份", files: [file] });
+      if (navigator.share && shareNavigator.canShare?.({ files: [file] })) await navigator.share({ title: "情侣小铺数据导出", files: [file] });
       else {
         const url = URL.createObjectURL(file);
         const link = document.createElement("a");
@@ -662,7 +969,7 @@ export default function Prototype() {
         link.click();
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
-      showToast("数据备份已生成");
+      showToast("数据已导出（照片只含引用路径）");
     } catch {
       showToast("导出失败，请稍后再试");
     }
@@ -673,6 +980,9 @@ export default function Prototype() {
     if (!client || !dangerConfirm) return;
     setCloudBusy(true);
     try {
+      // The RPCs delete the server rows; the browser subscription is ours to
+      // retire, or it would re-attach to whatever couple comes next.
+      await dropSubscription(client);
       if (dangerConfirm === "leave") {
         const { error } = await client.rpc("leave_couple_space");
         if (error) throw error;
@@ -695,11 +1005,22 @@ export default function Prototype() {
   };
 
   const dailyCheckin = async () => {
-    const client = cloudCoupleId ? await getSupabase() : null;
-    if (!client || !authUser) {
-      setAuthOpen(true);
-      return showToast("登录并连接双人小铺后才能签到");
+    // A local shop keeps its own streak: the reward is this identity's own coin,
+    // and there is no server involved in either mode's arithmetic.
+    if (!cloudCoupleId) {
+      if (!identity) return;
+      const today = todayKey();
+      if (wallet.checkins.includes(today)) return showToast("今天已经签过到啦");
+      const days = [today, ...wallet.checkins];
+      setWallet((current) => (current.owner === identity
+        ? { ...current, coins: current.coins + CHECKIN_REWARD, checkins: days }
+        : current));
+      return showToast(`连续签到 ${checkinStreak(days)} 天，甜心币 +${CHECKIN_REWARD}`);
     }
+    const client = await getSupabase();
+    // cloudCoupleId is read from localStorage synchronously while the session is
+    // still being restored, so authUser can legitimately be null for a moment.
+    if (!client || !authUser) return showToast("正在恢复登录状态，请稍后再试");
     const { data, error } = await client.rpc("daily_checkin").single();
     if (error) return showToast(rewardErrorMessage(error.message, "今天已经签过到啦"));
     const result = data as { coin_balance: number; streak: number; reward: number };
@@ -708,11 +1029,37 @@ export default function Prototype() {
     showToast(`连续签到 ${result.streak} 天，甜心币 +${result.reward}`);
   };
 
+  const requirePairedForPhotos = (): boolean => {
+    // The album is the one feature a local shop genuinely cannot have; point at
+    // the fix instead of at a login form that may not even be configured.
+    setMemoryOpen(false);
+    setView("ours");
+    showToast("照片回忆需要先连接双人小铺");
+    return false;
+  };
+
   const saveMemory = async () => {
     const client = cloudCoupleId ? await getSupabase() : null;
-    if (!client || !cloudCoupleId || !authUser) return showToast("请先登录并连接双人小铺");
+    if (!client || !cloudCoupleId || !authUser) return requirePairedForPhotos();
     if (!memoryCaption.trim()) return showToast("写一句这张照片的故事吧");
     if (!isValidDateKey(memoryDate) || memoryDate > todayKey()) return showToast("回忆日期不能晚于今天");
+    if (editingMemoryId) {
+      const caption = memoryCaption.trim();
+      setCloudBusy(true);
+      // RLS filters rather than fails, so an empty result means the row belongs
+      // to the other partner and only they may rewrite it.
+      const { data, error } = await client
+        .from("memory_entries")
+        .update({ caption, happened_on: memoryDate })
+        .eq("id", editingMemoryId)
+        .select("id");
+      setCloudBusy(false);
+      if (error) return showToast("保存失败，请稍后再试");
+      if (!data?.length) return showToast("只能修改自己上传的回忆");
+      setMemories((current) => current.map((item) => (item.id === editingMemoryId ? { ...item, caption, happenedOn: memoryDate } : item)));
+      closeMemory();
+      return showToast("回忆已更新");
+    }
     if (memoryFile && (memoryFile.size > 8 * 1024 * 1024 || !memoryFile.type.startsWith("image/"))) return showToast("请选择 8MB 以内的照片");
     setCloudBusy(true);
     let imagePath: string | undefined;
@@ -728,7 +1075,7 @@ export default function Prototype() {
       if (error) throw error;
       let imageUrl: string | undefined;
       if (imagePath) imageUrl = (await client.storage.from("memory-photos").createSignedUrl(imagePath, SIGNED_URL_TTL_SECONDS)).data?.signedUrl;
-      setMemories((current) => [{ id, caption: memoryCaption.trim(), happenedOn: memoryDate, imagePath, imageUrl, createdAt: new Date().toISOString() }, ...current]);
+      setMemories((current) => [{ id, caption: memoryCaption.trim(), happenedOn: memoryDate, imagePath, imageUrl, createdAt: new Date().toISOString(), createdBy: authUser.id }, ...current]);
       setMemoryCaption("");
       setMemoryFile(null);
       closeMemory();
@@ -741,20 +1088,123 @@ export default function Prototype() {
     }
   };
 
-  const saveAnniversary = async () => {
+  const deleteMemory = async (memory: MemoryEntry) => {
     const client = cloudCoupleId ? await getSupabase() : null;
-    if (!client || !cloudCoupleId || !authUser) return showToast("请先登录并连接双人小铺");
-    if (!anniversaryTitle.trim()) return showToast("请填写纪念日名称");
-    if (!isValidDateKey(anniversaryDate)) return showToast("请填写正确日期");
+    if (!client || !authUser) return requirePairedForPhotos();
     setCloudBusy(true);
-    const id = newId();
-    const { error } = await client.from("anniversaries").insert({ id, couple_id: cloudCoupleId, created_by: authUser.id, title: anniversaryTitle.trim(), event_date: anniversaryDate, repeats_yearly: true, reminder_days: 3 });
+    const { data, error } = await client.from("memory_entries").delete().eq("id", memory.id).select("id");
     setCloudBusy(false);
-    if (error) return showToast("保存失败，请稍后再试");
-    setAnniversaries((current) => [...current, { id, title: anniversaryTitle.trim(), eventDate: anniversaryDate, repeatsYearly: true, reminderDays: 3 }]);
-    setAnniversaryTitle("");
+    if (error) return showToast("删除失败，请稍后再试");
+    if (!data?.length) return showToast("只能删除自己上传的回忆");
+    // The row is already gone, so a failed object removal must not read as a
+    // failed delete; the orphaned file is cleaned up by storage retention.
+    if (memory.imagePath) await client.storage.from("memory-photos").remove([memory.imagePath]);
+    setMemories((current) => current.filter((item) => item.id !== memory.id));
+    closeMemoryDetail();
+    showToast("这份回忆已删除");
+  };
+
+  const anniversaryFields = () => ({
+    title: anniversaryTitle.trim(),
+    event_date: anniversaryDate,
+    repeats_yearly: anniversaryRepeats,
+    reminder_days: anniversaryReminder,
+  });
+
+  const saveAnniversary = async () => {
+    const title = anniversaryTitle.trim();
+    if (!title) return showToast("请填写纪念日名称");
+    if (!isValidDateKey(anniversaryDate)) return showToast("请填写正确日期");
+    if (cloudCoupleId && !authUser) return showToast("正在恢复登录状态，请稍后再试");
+    const entry: Anniversary = { id: editingAnniversaryId ?? newId(), title, eventDate: anniversaryDate, repeatsYearly: anniversaryRepeats, reminderDays: anniversaryReminder };
+    const client = cloudCoupleId ? await getSupabase() : null;
+    if (client && cloudCoupleId && authUser) {
+      setCloudBusy(true);
+      const { error } = editingAnniversaryId
+        ? await client.from("anniversaries").update(anniversaryFields()).eq("id", editingAnniversaryId)
+        : await client.from("anniversaries").insert({ id: entry.id, couple_id: cloudCoupleId, created_by: authUser.id, ...anniversaryFields() });
+      setCloudBusy(false);
+      if (error) return showToast("保存失败，请稍后再试");
+    }
+    setAnniversaries((current) => (editingAnniversaryId
+      ? current.map((item) => (item.id === entry.id ? entry : item))
+      : [...current, entry]));
+    const wasEditing = Boolean(editingAnniversaryId);
     closeAnniversary();
-    showToast("纪念日已保存，将提前 3 天提醒");
+    if (wasEditing) return showToast("纪念日已更新");
+    showToast(entry.reminderDays > 0 ? `纪念日已保存，将提前 ${entry.reminderDays} 天提醒` : "纪念日已保存，当天提醒");
+  };
+
+  const deleteAnniversary = async () => {
+    if (!editingAnniversaryId) return;
+    const id = editingAnniversaryId;
+    const client = cloudCoupleId ? await getSupabase() : null;
+    if (client) {
+      setCloudBusy(true);
+      const { error } = await client.from("anniversaries").delete().eq("id", id);
+      setCloudBusy(false);
+      if (error) return showToast("删除失败，请稍后再试");
+    }
+    setAnniversaries((current) => current.filter((item) => item.id !== id));
+    closeAnniversary();
+    showToast("纪念日已删除");
+  };
+
+  const openAddWish = () => {
+    setEditingWishId(null);
+    setWishDraft({ name: "", description: "", price: "48", category: category === "limited" ? "food" : category });
+    setWishOpen(true);
+  };
+
+  const openEditWish = (item: MenuItem) => {
+    setEditingWishId(item.id);
+    setWishDraft({ name: item.name, description: item.description, price: String(item.price), category: item.category });
+    setWishOpen(true);
+  };
+
+  const saveWish = async () => {
+    const name = wishDraft.name.trim();
+    const description = wishDraft.description.trim();
+    const price = Number(wishDraft.price);
+    if (!name) return showToast("给这个心愿起个名字吧");
+    if (name.length > 20) return showToast("名字最多 20 个字");
+    if (description.length > 40) return showToast("一句话介绍最多 40 个字");
+    if (!Number.isInteger(price) || price < CUSTOM_PRICE_RANGE.min || price > CUSTOM_PRICE_RANGE.max) {
+      return showToast(`价格请填 ${CUSTOM_PRICE_RANGE.min}–${CUSTOM_PRICE_RANGE.max} 之间的整数`);
+    }
+    const entry = customItemFrom({ id: editingWishId ?? newId(), category: wishDraft.category, name, description, price });
+    const client = cloudCoupleId ? await getSupabase() : null;
+    if (client && cloudCoupleId && authUser) {
+      setCloudBusy(true);
+      const fields = { category: entry.category, name, description, price };
+      const { error } = editingWishId
+        ? await client.from("custom_menu_items").update(fields).eq("id", editingWishId)
+        : await client.from("custom_menu_items").insert({ id: entry.id, couple_id: cloudCoupleId, created_by: authUser.id, ...fields });
+      setCloudBusy(false);
+      if (error) return showToast("保存失败，请稍后再试");
+    }
+    setCustomItems((current) => (editingWishId
+      ? current.map((item) => (item.id === entry.id ? entry : item))
+      : [...current, entry]));
+    setCategory(entry.category);
+    closeWish();
+    showToast(editingWishId ? "心愿已更新" : `「${name}」已经上架你们的小铺`);
+  };
+
+  const deleteWish = async () => {
+    if (!editingWishId) return;
+    const client = cloudCoupleId ? await getSupabase() : null;
+    if (client) {
+      setCloudBusy(true);
+      const { error } = await client.from("custom_menu_items").delete().eq("id", editingWishId);
+      setCloudBusy(false);
+      if (error) return showToast("删除失败，请稍后再试");
+    }
+    // Orders already placed keep their own name, price and category, so taking
+    // a wish off the menu never rewrites what has already happened.
+    setCustomItems((current) => current.filter((item) => item.id !== editingWishId));
+    closeWish();
+    showToast("这个心愿已经下架");
   };
 
   const openSettings = () => {
@@ -802,8 +1252,11 @@ export default function Prototype() {
   };
 
   const chooseRandom = () => {
-    const foods = MENU.filter((item) => item.category === "food");
-    const item = foods[Math.floor(Math.random() * foods.length)];
+    // Whichever category is open, not only 点吃的: the other three had no
+    // randomiser at all, which is where choosing gets hardest.
+    const pool = [...customItems, ...MENU].filter((item) => item.category === category && !usedLimitedIds.includes(item.id));
+    if (pool.length === 0) return showToast("这个分类已经没有可选的了");
+    const item = pool[Math.floor(Math.random() * pool.length)];
     setSelected(item);
     showToast(`今天就选「${item.name}」`);
   };
@@ -824,6 +1277,7 @@ export default function Prototype() {
       id: newId(),
       itemId: selected.id,
       itemName: selected.name,
+      itemCategory: selected.category,
       image: selected.image,
       price: selected.price,
       note: note.trim(),
@@ -853,8 +1307,14 @@ export default function Prototype() {
       setOrders((current) => [order, ...current.filter((item) => item.id !== order.id)]);
       closeOrderSheet();
       setNote("");
-      showToast(`下单成功，已提醒${partnerName}`);
-      await client.functions.invoke("notify-partner", { body: { orderId: order.id } });
+      setTime(DESIRED_TIMES[0]);
+      // Say only what is true right now; upgrade the wording once the push has
+      // actually been handed over. This used to claim delivery beforehand and
+      // then discard the invoke's error entirely.
+      showToast("下单成功，已记在小铺里");
+      const notice = await notifyPartner(client, order.id, "order.created");
+      if (notice && notice.delivered > 0) showToast(`下单成功，已提醒${partnerName}`);
+      else if (notice && notice.subscribed === 0) showToast(`${partnerName}还没开启通知，打开小铺时会看到`);
       return;
     }
     if (usedLimitedIds.includes(selected.id)) return showToast("这张限定券已经用过了");
@@ -863,25 +1323,55 @@ export default function Prototype() {
     setCoins((current) => current - selected.price);
     closeOrderSheet();
     setNote("");
+    setTime(DESIRED_TIMES[0]);
     showToast("下单成功，已记在小铺里");
   };
 
-  const updateStatus = async (id: string, status: OrderStatus) => {
+  /** Refunds the payer in local mode; the payer may be the other identity. */
+  const refundLocally = (target: Order) => {
+    const payer = target.from === currentName ? identity : partnerIdentity;
+    if (payer && payer === wallet.owner) setCoins((current) => current + target.price);
+    else if (payer) localStorage.setItem(walletKey(payer), String(loadEconomyCoins(payer) + target.price));
+  };
+
+  const cancelOrder = async (id: string) => {
     const target = orders.find((order) => order.id === id);
+    if (!target || target.status !== "pending") return;
     const client = cloudCoupleId ? await getSupabase() : null;
     if (client) {
-      const { data, error } = await client.rpc("update_order_status", { p_order_id: id, p_status: status }).single();
+      const { data, error } = await client.rpc("cancel_couple_order", { p_order_id: id }).single();
       if (error) return showToast(orderStatusErrorMessage(error.message));
       const result = data as { coin_balance: number } | null;
       if (typeof result?.coin_balance === "number") setCoins(result.coin_balance);
-    } else if (status === "rejected" && target) {
-      // Local mode has no server to refund with. The coins belong to whoever
-      // paid, which is normally the other identity's on-device wallet.
-      const payer = target.from === currentName ? identity : partnerIdentity;
-      if (payer && payer === wallet.owner) setCoins((current) => current + target.price);
-      else if (payer) localStorage.setItem(walletKey(payer), String(loadEconomyCoins(payer) + target.price));
+      void notifyPartner(client, id, "order.cancelled");
+    } else {
+      refundLocally(target);
     }
-    setOrders((current) => current.map((order) => (order.id === id ? { ...order, status } : order)));
+    setOrders((current) => current.map((order) => (order.id === id ? { ...order, status: "cancelled" } : order)));
+    showToast(`已撤回，${target.price} 甜心币退回给你`);
+  };
+
+  const updateStatus = async (id: string, status: OrderStatus, note?: string) => {
+    const target = orders.find((order) => order.id === id);
+    const client = cloudCoupleId ? await getSupabase() : null;
+    if (client) {
+      const { data, error } = await client.rpc("update_order_status", { p_order_id: id, p_status: status, p_note: note ?? null }).single();
+      if (error) return showToast(orderStatusErrorMessage(error.message));
+      const result = data as { coin_balance: number } | null;
+      if (typeof result?.coin_balance === "number") setCoins(result.coin_balance);
+      // The sender is the one who needs to hear this; this device says nothing
+      // about it, because the notification lands on the other phone.
+      void notifyPartner(client, id, `order.${status}`);
+    } else if (status === "rejected" && target) {
+      // Local mode has no server to refund with.
+      refundLocally(target);
+    }
+    // Local mode has no server to stamp the completion, and the weekly task and
+    // the monthly count both read it.
+    const completedAt = status === "done" ? new Date().toISOString() : undefined;
+    setOrders((current) => current.map((order) => (order.id === id
+      ? { ...order, status, completedAt: completedAt ?? order.completedAt, declineNote: status === "rejected" ? note : order.declineNote }
+      : order)));
     if (status === "rejected") showToast(`已婉拒，${target?.price ?? 0} 甜心币退回给${target?.from ?? "对方"}`);
     else if (status === "done") showToast("心愿完成，记得去任务中心领取奖励");
     else showToast(`订单已更新为「${statusText[status]}」`);
@@ -908,30 +1398,28 @@ export default function Prototype() {
   const enableNotifications = async () => {
     if (!notificationsSupported) return showToast("当前浏览器不支持通知");
     const permission = await Notification.requestPermission();
-    setNotificationsEnabled(permission === "granted");
+    setPushState((current) => ({ ...current, permission }));
     if (permission !== "granted") return showToast("需要在 iPhone 设置中允许通知");
-    showToast("通知已开启");
-    if (!("serviceWorker" in navigator)) return;
-    const registration = await navigator.serviceWorker.ready;
-    const vapidPublicKey = import.meta.env.VITE_WEB_PUSH_PUBLIC_KEY as string | undefined;
+    // Everything below decides whether this device can actually be pushed to.
+    // The old code promised push unconditionally, including when it had just
+    // reported that the subscription failed.
+    const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : undefined;
     const client = cloudCoupleId ? await getSupabase() : null;
-    if (vapidPublicKey && client && cloudCoupleId) {
-      try {
-        const padding = "=".repeat((4 - (vapidPublicKey.length % 4)) % 4);
-        const base64 = (vapidPublicKey + padding).replace(/-/g, "+").replace(/_/g, "/");
-        const applicationServerKey = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
-        const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
-        const json = subscription.toJSON();
-        const { data: sessionData } = await client.auth.getSession();
-        await client.from("push_subscriptions").upsert(
-          { user_id: sessionData.session?.user.id, couple_id: cloudCoupleId, endpoint: json.endpoint, p256dh: json.keys?.p256dh, auth: json.keys?.auth },
-          { onConflict: "endpoint" },
-        );
-      } catch {
-        showToast("通知已开启，但推送订阅失败，稍后可重试");
-      }
+    if (!registration || !vapidPublicKey()) return showToast("通知已开启；这台设备只能在打开小铺时提醒你");
+    if (!client || !cloudCoupleId || !authUser) return showToast(`通知已开启；连接双人小铺后才能收到${partnerName}的提醒`);
+    try {
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: applicationServerKey(vapidPublicKey()!),
+      });
+      await saveSubscription(client, subscription, cloudCoupleId, authUser.id);
+      setPushState({ permission, subscribed: true });
+      showToast(`已开启，${partnerName}下单或回应时会推送到这台手机`);
+      void registration.showNotification("点单小铺", { body: "以后有新订单和回应，我会马上告诉你。", icon: "/assets/app-icon.png" });
+    } catch {
+      setPushState({ permission, subscribed: false });
+      showToast("通知已开启，但推送订阅失败，稍后可重试");
     }
-    registration.showNotification("点单小铺", { body: "以后有新订单，我会马上告诉你。", icon: "/assets/app-icon.png" });
   };
 
   const createCloudSpace = async () => {
@@ -1017,8 +1505,48 @@ export default function Prototype() {
   const syncState = cloudCoupleId
     ? { title: `与${partnerName}的小铺已连接`, detail: "新订单会实时送到对方手机", live: true }
     : cloudEnabled
-      ? { title: `还没有连接${partnerName}`, detail: "去「我们」页创建小铺或输入情侣码", live: false }
+      ? { title: `还没有连接${partnerName}`, detail: "点这里创建小铺或输入情侣码", live: false }
       : { title: "本地体验模式", detail: "订单只保存在这台 iPhone 上", live: false };
+
+  // The cloud steps only exist for a build that has a project behind it; on a
+  // local install the checklist is honestly two steps long.
+  const openingSteps: OpeningStep[] = [
+    { id: "identity", title: `身份：${currentName}`, detail: "另一台 iPhone 选另一个身份", done: true },
+    ...(cloudEnabled ? [
+      {
+        id: "account",
+        title: "注册正式账户",
+        detail: "换手机后凭账户恢复你们的小铺",
+        done: Boolean(authUser && !authUser.is_anonymous),
+        action: openAccount,
+        cta: "去注册账户",
+      },
+      {
+        id: "pair",
+        title: "创建或加入小铺",
+        detail: `和${partnerName}用同一个情侣码连接`,
+        done: Boolean(cloudCoupleId),
+        action: () => setView("ours"),
+        cta: "去连接双人小铺",
+      },
+      {
+        id: "push",
+        title: "开启消息通知",
+        detail: "对方下单或回应时收到提醒",
+        done: pushState.subscribed,
+        action: enableNotifications,
+        cta: "去开启通知",
+      },
+    ] : []),
+    {
+      id: "order",
+      title: "送出第一个心愿",
+      detail: `攒够甜心币，点一份给${partnerName}`,
+      done: orders.length > 0,
+      action: () => setView("shop"),
+      cta: "去挑一个心愿",
+    },
+  ];
 
   return (
     <div className="app-shell">
@@ -1029,27 +1557,88 @@ export default function Prototype() {
             <div className="brand-copy"><span>{profile.firstName} & {profile.secondName}</span><h1>{profile.shopName}</h1></div>
             <button className="bell-button" onClick={() => setView("orders")} aria-label="查看订单"><BellIcon />{activeOrders > 0 && <span>{activeOrders}</span>}</button>
           </header>
-          <section className="live-push-strip" aria-label="同步状态">
+          {/* Not a sign when it is also the fix: unpaired, this line is the
+              shortest route to pairing, so it is a button. */}
+          <section
+            className="live-push-strip"
+            aria-label={syncState.live ? "同步状态" : "去连接双人小铺"}
+            role={syncState.live ? undefined : "button"}
+            tabIndex={syncState.live ? undefined : 0}
+            onClick={syncState.live ? undefined : () => setView("ours")}
+          >
             <span className="live-push-icon"><BellIcon /></span>
             <div><strong>{syncState.title}</strong><small>{syncState.detail}</small></div>
-            {syncState.live && <span className="live-state"><i /> 实时</span>}
+            {syncState.live ? <span className="live-state"><i /> 实时</span> : <span className="live-go">去连接</span>}
           </section>
+          {view === "shop" && !openingDismissed && (
+            <OpeningProgress steps={openingSteps} onDismiss={() => {
+              localStorage.setItem(STORAGE_KEYS.openingDismissed, "1");
+              setOpeningDismissed(true);
+            }} />
+          )}
           <section className="wallet-card">
             <div className="coin-count"><HeartFilledIcon /><strong>{coins}</strong><span>甜心币</span></div>
             <button className="earn-link" onClick={() => setView("tasks")}><CheckCircledIcon /><span>做任务赚币</span></button>
           </section>
 
-          {view === "shop" && <ShopScreen category={category} setCategory={setCategory} onAdd={setSelected} onRandom={chooseRandom} usedLimitedIds={usedLimitedIds} />}
-          {view === "tasks" && <TasksScreen coins={coins} claimedTasks={claimedTasks} onClaim={claimTask} />}
-          {view === "orders" && <OrdersScreen orders={orders} currentName={currentName} onStatus={updateStatus} />}
-          {view === "memories" && <MemoriesScreen orders={orders} profile={profile} memories={memories} anniversaries={anniversaries} checkin={checkin} onCheckin={dailyCheckin} onAddMemory={() => setMemoryOpen(true)} onAddAnniversary={() => setAnniversaryOpen(true)} />}
+          {view === "shop" && (
+            <ShopScreen
+              category={category}
+              setCategory={setCategory}
+              onAdd={setSelected}
+              onRandom={chooseRandom}
+              usedLimitedIds={usedLimitedIds}
+              customItems={customItems}
+              onAddCustom={openAddWish}
+              onEditCustom={openEditWish}
+            />
+          )}
+          {view === "tasks" && (
+            <TasksScreen
+              coins={coins}
+              claimedTasks={claimedTasks}
+              onClaim={claimTask}
+              orders={orders}
+              memories={memories}
+              currentName={currentName}
+              currentUserId={authUser?.id}
+              memoriesTracked={Boolean(cloudCoupleId)}
+            />
+          )}
+          {view === "orders" && (
+            <OrdersScreen
+              orders={orders}
+              currentName={currentName}
+              onStatus={updateStatus}
+              onCancel={cancelOrder}
+              onKeepAsMemory={keepOrderAsMemory}
+              focusOrderId={focusOrderId}
+              onFocusConsumed={() => setFocusOrderId(null)}
+              onBrowseShop={() => setView("shop")}
+            />
+          )}
+          {view === "memories" && (
+            <MemoriesScreen
+              orders={orders}
+              profile={profile}
+              memories={memories}
+              anniversaries={anniversaries}
+              checkin={cloudCoupleId ? checkin : checkinStatusFrom(wallet.checkins)}
+              onCheckin={dailyCheckin}
+              onAddMemory={openAddMemory}
+              onOpenMemory={setMemoryDetail}
+              onAddAnniversary={openAddAnniversary}
+              onEditAnniversary={openEditAnniversary}
+              paired={Boolean(cloudCoupleId)}
+              onPair={() => setView("ours")}
+            />
+          )}
           {view === "ours" && (
             <OursScreen
               identity={identity}
               partnerName={partnerName}
               onSwitchIdentity={switchIdentity}
-              notificationsSupported={notificationsSupported}
-              notificationsEnabled={notificationsEnabled}
+              push={pushState}
               onEnableNotifications={enableNotifications}
               cloudCoupleId={cloudCoupleId}
               inviteCode={cloudCoupleId ? inviteCode : null}
@@ -1085,7 +1674,14 @@ export default function Prototype() {
         {selected && (
           <div className="order-sheet">
             <div className="sheet-item"><div className="sheet-art"><MenuArt item={selected} /></div><div><h3>{selected.name}</h3><p>{selected.description}</p></div><div className="price-pill"><HeartFilledIcon /> {selected.price}</div></div>
-            <div className="time-options"><span>希望什么时候</span><div>{["尽快", "今晚 20:30", "明天见面时"].map((option) => <button key={option} className={time === option ? "active" : ""} onClick={() => setTime(option)}>{option}</button>)}</div></div>
+            <div className="time-options">
+              <span>希望什么时候</span>
+              <div>{DESIRED_TIMES.map((option) => <button key={option} className={time === option ? "active" : ""} onClick={() => setTime(option)}>{option}</button>)}</div>
+            </div>
+            <label className="order-note-field" htmlFor="order-time">
+              <span>或者写一个具体时间</span>
+              <KeyboardInput id="order-time" value={time} maxLength={40} onChange={(event) => setTime(event.target.value)} placeholder="例如：周六下午三点" />
+            </label>
             <label className="order-note-field" htmlFor="order-note">
               <span>给对方的悄悄话</span>
               <KeyboardInput id="order-note" value={note} maxLength={160} onChange={(event) => setNote(event.target.value)} placeholder="例如：想和你一起慢慢吃" />
@@ -1093,6 +1689,37 @@ export default function Prototype() {
             <button className="submit-order" onClick={submitOrder}><HeartFilledIcon /> 确认下单 · {selected.price} 甜心币</button>
           </div>
         )}
+      </BottomSheet>
+
+      <BottomSheet open={wishOpen} onOpenChange={(open) => (open ? setWishOpen(true) : closeWish())} title={editingWishId ? "修改这个心愿" : "写一个我们的心愿"} description={`价格 ${CUSTOM_PRICE_RANGE.min}–${CUSTOM_PRICE_RANGE.max} 甜心币，两个人都能修改`}>
+        <div className="memory-form">
+          <label className="account-field" htmlFor="wish-name"><span>心愿名字</span><KeyboardInput id="wish-name" value={wishDraft.name} maxLength={20} onChange={(event) => setWishDraft((current) => ({ ...current, name: event.target.value }))} placeholder="例如：陪我去菜市场" /></label>
+          <label className="account-field" htmlFor="wish-desc"><span>一句话介绍</span><KeyboardInput id="wish-desc" value={wishDraft.description} maxLength={40} onChange={(event) => setWishDraft((current) => ({ ...current, description: event.target.value }))} placeholder="例如：挑晚饭的菜，顺便牵手" /></label>
+          <div className="option-field">
+            <span>放进哪个分类</span>
+            <div className="option-row">
+              {CUSTOM_CATEGORIES.map((option) => (
+                <button key={option} className={wishDraft.category === option ? "active" : ""} onClick={() => setWishDraft((current) => ({ ...current, category: option }))}>
+                  {categoryMeta.find((meta) => meta.id === option)!.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="account-field" htmlFor="wish-price"><span>要多少甜心币</span><KeyboardInput id="wish-price" value={wishDraft.price} inputMode="numeric" maxLength={3} onChange={(event) => setWishDraft((current) => ({ ...current, price: event.target.value.replace(/\D/g, "") }))} placeholder="48" /></label>
+          {confirmDelete === "wish" ? (
+            <div className="delete-confirm">
+              <strong>下架后不会再出现在菜单里</strong>
+              <p>已经点过的订单会保留原来的名字和价格，不受影响。</p>
+              <button className="account-danger" disabled={cloudBusy} onClick={deleteWish}>{cloudBusy ? "正在下架…" : "确认下架"}</button>
+              <button className="account-secondary" onClick={() => setConfirmDelete(null)}>我再想想</button>
+            </div>
+          ) : (
+            <>
+              <button className="account-primary" disabled={cloudBusy} onClick={saveWish}>{cloudBusy ? "正在保存…" : editingWishId ? "保存修改" : "上架这个心愿"}</button>
+              {editingWishId && <button className="account-danger" onClick={() => setConfirmDelete("wish")}><TrashIcon /> 下架这个心愿</button>}
+            </>
+          )}
+        </div>
       </BottomSheet>
 
       <BottomSheet open={settingsOpen} onOpenChange={(open) => (open ? setSettingsOpen(true) : closeSettings())} title="小铺资料" description={cloudCoupleId ? "保存后会同步到另一台 iPhone" : "连接双人云同步后，资料会自动同步"}>
@@ -1141,41 +1768,111 @@ export default function Prototype() {
               <button className="account-primary" disabled={authBusy} onClick={submitAuth}>{authBusy ? "处理中…" : authMode === "recover" ? "发送重置邮件" : authMode === "new-password" ? "保存新密码" : authMode === "phone" ? phoneOtpSent ? "验证并登录" : "发送验证码" : authMode === "signup" ? authUser?.is_anonymous ? "保护现有数据" : "注册账户" : "登录并恢复"}</button>
               {authMode === "signin" && <button className="auth-link" onClick={() => setAuthMode("recover")}>忘记密码？找回账户</button>}
               {(authMode === "recover" || authMode === "phone") && <button className="auth-link" onClick={() => { setAuthMode("signin"); setPhoneOtpSent(false); }}>返回邮箱登录</button>}
-              {authMode !== "recover" && authMode !== "new-password" && <><div className="auth-divider"><span>其他登录方式</span></div><div className="provider-grid"><button onClick={() => setAuthMode("phone")}><span>☎</span> 手机号</button><button onClick={signInWithApple}><span className="apple-mark">●</span> Apple</button></div><p className="provider-note">手机号需配置短信服务；Apple 登录需配置 Apple Developer 凭据。</p></>}
+              {/* Only providers this deployment has actually configured are
+                  offered: an unconfigured one leads straight into a failure. */}
+              {authMode !== "recover" && authMode !== "new-password" && (phoneAuthEnabled || appleAuthEnabled) && (
+                <>
+                  <div className="auth-divider"><span>其他登录方式</span></div>
+                  <div className="provider-grid">
+                    {phoneAuthEnabled && <button onClick={() => setAuthMode("phone")}><span>☎</span> 手机号</button>}
+                    {appleAuthEnabled && <button onClick={signInWithApple}><span className="apple-mark">●</span> Apple</button>}
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>
       </BottomSheet>
 
-      <BottomSheet open={memoryOpen} onOpenChange={(open) => (open ? setMemoryOpen(true) : closeMemory())} title="收藏照片回忆" description="照片仅双人小铺成员可见，单张不超过 8MB">
+      <BottomSheet open={memoryOpen} onOpenChange={(open) => (open ? setMemoryOpen(true) : closeMemory())} title={editingMemoryId ? "修改这份回忆" : "收藏照片回忆"} description={editingMemoryId ? "照片本身不可替换，删除后重新收藏即可" : "照片仅双人小铺成员可见，单张不超过 8MB"}>
         <div className="memory-form">
-          <input ref={fileInputRef} className="hidden-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={(event) => setMemoryFile(event.target.files?.[0] ?? null)} />
-          <button className={`photo-picker ${memoryFile ? "selected" : ""}`} onClick={() => fileInputRef.current?.click()}><CameraIcon /><strong>{memoryFile ? memoryFile.name : "选择一张照片"}</strong><span>{memoryFile ? `${(memoryFile.size / 1024 / 1024).toFixed(1)} MB` : "支持相册与相机"}</span></button>
+          {!editingMemoryId && (
+            <>
+              <input ref={fileInputRef} className="hidden-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={(event) => setMemoryFile(event.target.files?.[0] ?? null)} />
+              <button className={`photo-picker ${memoryFile ? "selected" : ""}`} onClick={() => fileInputRef.current?.click()}><CameraIcon /><strong>{memoryFile ? memoryFile.name : "选择一张照片"}</strong><span>{memoryFile ? `${(memoryFile.size / 1024 / 1024).toFixed(1)} MB` : "支持相册与相机"}</span></button>
+            </>
+          )}
           <label className="account-field"><span>这张照片的故事</span><KeyboardInput value={memoryCaption} maxLength={160} onChange={(event) => setMemoryCaption(event.target.value)} placeholder="例如：第一次一起去看海" /></label>
           <label className="account-field"><span>发生日期</span><KeyboardInput value={memoryDate} inputMode="numeric" maxLength={10} onChange={(event) => setMemoryDate(normalizeDateInput(event.target.value))} placeholder="YYYY-MM-DD" /></label>
-          <button className="account-primary" disabled={cloudBusy} onClick={saveMemory}>{cloudBusy ? "正在收藏…" : "保存到双人回忆"}</button>
+          <button className="account-primary" disabled={cloudBusy} onClick={saveMemory}>{cloudBusy ? "正在保存…" : editingMemoryId ? "保存修改" : "保存到双人回忆"}</button>
         </div>
       </BottomSheet>
 
-      <BottomSheet open={anniversaryOpen} onOpenChange={(open) => (open ? setAnniversaryOpen(true) : closeAnniversary())} title="添加纪念日" description="每年重复，并在进入小铺时提前 3 天提醒">
+      <BottomSheet open={Boolean(memoryDetail)} onOpenChange={(open) => !open && closeMemoryDetail()} title="这份回忆" description={memoryDetail ? `记录于 ${memoryDetail.happenedOn}` : ""}>
+        {memoryDetail && (
+          <div className="memory-detail">
+            {memoryDetail.imageUrl
+              ? <img src={memoryDetail.imageUrl} alt={memoryDetail.caption} draggable="false" />
+              : <div className="memory-detail-blank"><ImageIcon /><span>这条回忆没有照片</span></div>}
+            <h3>{memoryDetail.caption}</h3>
+            <p>{memoryDetail.happenedOn}</p>
+            {memoryDetail.createdBy && authUser && memoryDetail.createdBy !== authUser.id ? (
+              <p className="memory-detail-note">这是{partnerName}收藏的回忆，只有 TA 能修改或删除。</p>
+            ) : confirmDelete === "memory" ? (
+              <div className="delete-confirm">
+                <strong>删除后无法恢复</strong>
+                <p>照片和这段文字都会从双人空间移除，{partnerName}那边也会一起消失。</p>
+                <button className="account-danger" disabled={cloudBusy} onClick={() => deleteMemory(memoryDetail)}>{cloudBusy ? "正在删除…" : "确认删除"}</button>
+                <button className="account-secondary" onClick={() => setConfirmDelete(null)}>我再想想</button>
+              </div>
+            ) : (
+              <div className="memory-detail-actions">
+                <button className="account-secondary" onClick={() => openEditMemory(memoryDetail)}><Pencil1Icon /> 修改文字</button>
+                <button className="account-danger" onClick={() => setConfirmDelete("memory")}><TrashIcon /> 删除回忆</button>
+              </div>
+            )}
+          </div>
+        )}
+      </BottomSheet>
+
+      <BottomSheet open={anniversaryOpen} onOpenChange={(open) => (open ? setAnniversaryOpen(true) : closeAnniversary())} title={editingAnniversaryId ? "管理纪念日" : "添加纪念日"} description="提醒会在打开小铺时出现，两个人都能修改">
         <div className="memory-form">
           <label className="account-field"><span>纪念日名称</span><KeyboardInput value={anniversaryTitle} maxLength={40} onChange={(event) => setAnniversaryTitle(event.target.value)} placeholder="例如：第一次见面" /></label>
           <label className="account-field"><span>日期</span><KeyboardInput value={anniversaryDate} inputMode="numeric" maxLength={10} onChange={(event) => setAnniversaryDate(normalizeDateInput(event.target.value))} placeholder="YYYY-MM-DD" /></label>
-          <div className="reminder-note"><BellIcon /><div><strong>提前 3 天提醒</strong><p>当前版本会在打开小铺时提醒；开启消息通知后将接入后台定时推送。</p></div></div>
-          <button className="account-primary" disabled={cloudBusy} onClick={saveAnniversary}>{cloudBusy ? "正在保存…" : "保存纪念日"}</button>
+          <div className="option-field">
+            <span>重复方式</span>
+            <div className="option-row">
+              <button className={anniversaryRepeats ? "active" : ""} onClick={() => setAnniversaryRepeats(true)}>每年重复</button>
+              <button className={anniversaryRepeats ? "" : "active"} onClick={() => setAnniversaryRepeats(false)}>仅这一次</button>
+            </div>
+          </div>
+          <div className="option-field">
+            <span>提前提醒</span>
+            <div className="option-row">
+              {[0, 1, 3, 7].map((days) => (
+                <button key={days} className={anniversaryReminder === days ? "active" : ""} onClick={() => setAnniversaryReminder(days)}>{days === 0 ? "当天" : `${days} 天`}</button>
+              ))}
+            </div>
+          </div>
+          <div className="reminder-note"><BellIcon /><div><strong>{anniversaryReminder === 0 ? "当天提醒" : `提前 ${anniversaryReminder} 天提醒`}</strong><p>提醒会在你打开小铺时出现；小铺不会在后台叫醒你。</p></div></div>
+          {confirmDelete === "anniversary" ? (
+            <div className="delete-confirm">
+              <strong>删除后无法恢复</strong>
+              <p>「{anniversaryTitle.trim() || "这个纪念日"}」会从双人小铺移除，之后也不会再提醒。</p>
+              <button className="account-danger" disabled={cloudBusy} onClick={deleteAnniversary}>{cloudBusy ? "正在删除…" : "确认删除"}</button>
+              <button className="account-secondary" onClick={() => setConfirmDelete(null)}>我再想想</button>
+            </div>
+          ) : (
+            <>
+              <button className="account-primary" disabled={cloudBusy} onClick={saveAnniversary}>{cloudBusy ? "正在保存…" : editingAnniversaryId ? "保存修改" : "保存纪念日"}</button>
+              {editingAnniversaryId && <button className="account-danger" onClick={() => setConfirmDelete("anniversary")}><TrashIcon /> 删除这个纪念日</button>}
+            </>
+          )}
         </div>
       </BottomSheet>
+
+      <OnboardingSheet open={onboardingOpen} partnerName={partnerName} onFinish={finishOnboarding} />
 
       <BottomSheet open={privacyOpen} onOpenChange={(open) => { setPrivacyOpen(open); if (!open) setDangerConfirm(null); }} title={dangerConfirm === "leave" ? "确认解除配对" : dangerConfirm === "delete" ? "确认注销账户" : "隐私与账户安全"} description="你的数据、你的选择，随时可以带走或删除">
         <div className="privacy-sheet">
           {dangerConfirm ? (
-            <div className="danger-confirm"><span><TrashIcon /></span><h3>{dangerConfirm === "leave" ? "解除后，两台手机将停止同步" : "注销后，账户无法恢复"}</h3><p>{dangerConfirm === "leave" ? "当前账户会离开双人小铺；另一半的账户和共同数据会保留。你以后仍可用新情侣码重新配对。" : "你的登录账户、配对关系和个人数据会立即删除；若小铺只剩你一人，共同数据也会一并删除。请先导出备份。"}</p><button className="danger-final" disabled={cloudBusy} onClick={confirmDangerAction}>{cloudBusy ? "正在处理…" : dangerConfirm === "leave" ? "确认解除配对" : "确认永久注销"}</button><button className="account-secondary" onClick={() => setDangerConfirm(null)}>我再想想</button></div>
+            <div className="danger-confirm"><span><TrashIcon /></span><h3>{dangerConfirm === "leave" ? "解除后，两台手机将停止同步" : "注销后，账户无法恢复"}</h3><p>{dangerConfirm === "leave" ? "当前账户会离开双人小铺；另一半的账户和共同数据会保留。你以后仍可用新情侣码重新配对。" : "你的登录账户、配对关系和个人数据会立即删除；若小铺只剩你一人，共同数据也会一并删除。请先导出数据。"}</p><button className="danger-final" disabled={cloudBusy} onClick={confirmDangerAction}>{cloudBusy ? "正在处理…" : dangerConfirm === "leave" ? "确认解除配对" : "确认永久注销"}</button><button className="account-secondary" onClick={() => setDangerConfirm(null)}>我再想想</button></div>
           ) : (
             <>
               <div className="privacy-section"><span><LockClosedIcon /></span><div><strong>我们保存什么</strong><p>账户标识、情侣配对、订单、任务、签到、回忆照片、纪念日和必要的安全操作记录。</p></div></div>
               <div className="privacy-section"><span><ReaderIcon /></span><div><strong>这些数据怎么使用</strong><p>只用于双人同步、提醒、账号恢复、防刷币和故障排查；不会出售给广告平台。</p></div></div>
               <div className="privacy-section"><span><DownloadIcon /></span><div><strong>数据权利</strong><p>你可以随时导出数据、解除配对或注销账户。照片使用私有存储和短时访问链接。</p></div></div>
-              <div className="security-grid"><div><strong>限流</strong><span>订单、任务、签到</span></div><div><strong>审计</strong><span>关键操作留痕</span></div><div><strong>备份</strong><span>随时导出 JSON</span></div></div>
+              <div className="security-grid"><div><strong>限流</strong><span>订单、任务、签到</span></div><div><strong>审计</strong><span>关键操作留痕</span></div><div><strong>导出</strong><span>随时下载 JSON</span></div></div>
               <div className="legal-links"><button onClick={() => window.open("/privacy.html", "_blank", "noopener,noreferrer")}>完整隐私政策</button><button onClick={() => window.open("/terms.html", "_blank", "noopener,noreferrer")}>完整用户协议</button></div>
               <button className="account-secondary" onClick={exportData}><DownloadIcon /> 导出我的数据</button>
               {authUser && !authUser.is_anonymous && <button className="account-danger" onClick={() => setDangerConfirm("delete")}><TrashIcon /> 注销账户</button>}

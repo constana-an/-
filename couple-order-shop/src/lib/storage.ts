@@ -1,6 +1,6 @@
 import { isValidDateKey, todayKey } from "./date.ts";
 import { IDENTITIES } from "./types.ts";
-import type { CoupleProfile, Identity, Order } from "./types.ts";
+import type { Anniversary, CoupleProfile, Identity, MenuItem, Order } from "./types.ts";
 
 export const STORAGE_KEYS = {
   profile: "couple-shop-profile",
@@ -12,6 +12,12 @@ export const STORAGE_KEYS = {
   cloudId: "couple-shop-cloud-id",
   inviteCode: "couple-shop-invite-code",
   privacyAccepted: "couple-shop-privacy-accepted",
+  onboarded: "couple-shop-onboarded",
+  customItems: "couple-shop-custom-items",
+  checkins: "couple-shop-checkins",
+  anniversaries: "couple-shop-anniversaries",
+  reminded: "couple-shop-reminded",
+  openingDismissed: "couple-shop-opening-dismissed",
 } as const;
 
 export const DEFAULT_PROFILE: CoupleProfile = {
@@ -49,11 +55,95 @@ export function loadLocalOrders(): Order[] {
   }
 }
 
+/**
+ * Wishes the couple wrote themselves. In cloud mode they live in
+ * `custom_menu_items`; on a local-only install this is the whole store, and it
+ * is shared between the two identities on the device like the order list is.
+ */
+export function loadCustomItems(): MenuItem[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.customItems) ?? "[]") as unknown;
+    if (!Array.isArray(saved)) return [];
+    return saved.filter((item): item is MenuItem =>
+      Boolean(item) && typeof item === "object"
+      && typeof (item as MenuItem).id === "string"
+      && typeof (item as MenuItem).name === "string"
+      && typeof (item as MenuItem).price === "number");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Anniversaries the couple keeps on this device. Cloud mode replaces these with
+ * the server's rows; a local-only shop has nowhere else to put them.
+ */
+export function loadLocalAnniversaries(): Anniversary[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEYS.anniversaries) ?? "[]") as unknown;
+    if (!Array.isArray(saved)) return [];
+    // The same constraints the server enforces, so a local shop that later
+    // pairs cannot carry a row the database would reject.
+    return saved.filter((item): item is Anniversary => {
+      const entry = item as Partial<Anniversary> | null;
+      return Boolean(entry)
+        && typeof entry!.id === "string"
+        && typeof entry!.title === "string"
+        && entry!.title.trim().length >= 1 && entry!.title.length <= 40
+        && typeof entry!.eventDate === "string" && isValidDateKey(entry!.eventDate)
+        && typeof entry!.repeatsYearly === "boolean"
+        && Number.isInteger(entry!.reminderDays) && entry!.reminderDays! >= 0 && entry!.reminderDays! <= 30;
+    });
+  } catch {
+    return [];
+  }
+}
+
 export const OPENING_BALANCE = 8;
+
+/** Matches the `reward` a cloud `daily_checkin()` credits. */
+export const CHECKIN_REWARD = 1;
 
 /** Wallets are per identity: 大宝 cannot spend 二宝's coins, and vice versa. */
 export const walletKey = (identity: Identity) => `${STORAGE_KEYS.coins}:${identity}`;
 export const claimsKey = (identity: Identity) => `${STORAGE_KEYS.taskClaims}:${identity}`;
+/** Check-ins are personal too: they pay into that identity's own wallet. */
+export const checkinsKey = (identity: Identity) => `${STORAGE_KEYS.checkins}:${identity}`;
+
+/** A year and a day is all the history a streak can ever need. */
+const CHECKIN_HISTORY_LIMIT = 366;
+
+export function loadCheckinDays(identity: Identity | null): string[] {
+  if (!identity) return [];
+  try {
+    const saved = JSON.parse(localStorage.getItem(checkinsKey(identity)) ?? "[]") as unknown;
+    if (!Array.isArray(saved)) return [];
+    const today = todayKey();
+    // A day in the future can only come from a wound-forward clock, and it
+    // would anchor the streak somewhere the calendar has not reached.
+    const days = saved.filter((value): value is string =>
+      typeof value === "string" && isValidDateKey(value) && value <= today);
+    return [...new Set(days)].sort().reverse().slice(0, CHECKIN_HISTORY_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+export const remindedKey = (anniversaryId: string, day: string) => `${STORAGE_KEYS.reminded}:${anniversaryId}:${day}`;
+
+/**
+ * Anniversary reminders are deduped with one key per anniversary per day. Only
+ * today's matter, so everything older is swept on the way past.
+ */
+export function pruneReminders(today: string = todayKey()): void {
+  const stale: string[] = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    // Collect first: removing inside the walk shifts every later index.
+    if (key?.startsWith(`${STORAGE_KEYS.reminded}:`) && !key.endsWith(`:${today}`)) stale.push(key);
+  }
+  for (const key of stale) localStorage.removeItem(key);
+}
 
 /**
  * Economy version 4 split the single shared wallet into one wallet per person.

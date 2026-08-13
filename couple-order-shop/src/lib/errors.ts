@@ -33,6 +33,9 @@ export function orderStatusErrorMessage(message: string): string {
 export function rewardErrorMessage(message: string, duplicateCopy: string): string {
   const lower = message.toLowerCase();
   if (lower.includes("duplicate") || lower.includes("unique")) return duplicateCopy;
+  if (lower.includes("requirement not met: photo")) return "先去「回忆」上传一张本周的照片再来领";
+  if (lower.includes("requirement not met: date-done")) return "先完成一份对方点的「去约会」心愿再来领";
+  if (lower.includes("requirement not met")) return "先完成一份对方点的心愿再来领";
   if (lower.includes("rate limit")) return "操作太频繁，请稍后再试";
   if (lower.includes("not paired")) return "还没有连接双人小铺";
   return "操作失败，请稍后再试";

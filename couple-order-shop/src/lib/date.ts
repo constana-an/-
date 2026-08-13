@@ -26,6 +26,21 @@ export function todayKey(): string {
   return dateKey();
 }
 
+/** The `YYYY-MM-DD` day of an ISO timestamp, or null if unparseable. */
+export function dayKeyOf(value: string): string | null {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : dateKey(parsed);
+}
+
+/** The `YYYY-MM` calendar month of an ISO timestamp, or null if unparseable. */
+export function monthKeyOf(value: string): string | null {
+  return dayKeyOf(value)?.slice(0, 7) ?? null;
+}
+
+export function thisMonthKey(): string {
+  return dateKey().slice(0, 7);
+}
+
 /** Parses `YYYY-MM-DD` into a UTC-midnight anchor for calendar-only math. */
 function anchorOf(key: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
@@ -39,6 +54,14 @@ export function weekKey(value: Date = new Date()): string {
   const anchor = anchorOf(dateKey(value))!;
   const weekday = anchor.getUTCDay() || 7;
   anchor.setUTCDate(anchor.getUTCDate() - weekday + 1);
+  return anchor.toISOString().slice(0, 10);
+}
+
+/** `key` moved by `delta` calendar days, still as `YYYY-MM-DD`. */
+export function shiftDay(key: string, delta: number): string {
+  const anchor = anchorOf(key);
+  if (!anchor) return key;
+  anchor.setUTCDate(anchor.getUTCDate() + delta);
   return anchor.toISOString().slice(0, 10);
 }
 
@@ -84,6 +107,53 @@ export function daysUntilAnniversary(eventDate: string, repeatsYearly: boolean):
     if (target < today) target = new Date(Date.UTC(today.getUTCFullYear() + 1, source.getUTCMonth(), source.getUTCDate()));
   }
   return Math.max(0, Math.round((target.getTime() - today.getTime()) / 86_400_000));
+}
+
+type AnniversaryLike = { eventDate: string; repeatsYearly: boolean; reminderDays: number };
+
+/** A date that happens once and has already happened never comes round again. */
+export function isPastOneOff(eventDate: string, repeatsYearly: boolean): boolean {
+  return !repeatsYearly && isValidDateKey(eventDate) && eventDate < todayKey();
+}
+
+/**
+ * The anniversary whose reminder window is open today, soonest first.
+ *
+ * Past one-off dates are dropped rather than counted: `daysUntilAnniversary`
+ * clamps them to 0, so they would otherwise sit permanently inside every
+ * reminder window and announce themselves as "今天" every single day.
+ */
+export function dueAnniversaries<T extends AnniversaryLike>(items: readonly T[]): Array<{ item: T; days: number }> {
+  return items
+    .filter((item) => !isPastOneOff(item.eventDate, item.repeatsYearly))
+    .map((item) => ({ item, days: daysUntilAnniversary(item.eventDate, item.repeatsYearly) }))
+    .filter(({ item, days }) => days <= item.reminderDays)
+    .sort((a, b) => a.days - b.days);
+}
+
+export function dueAnniversary<T extends AnniversaryLike>(items: readonly T[]): { item: T; days: number } | null {
+  return dueAnniversaries(items)[0] ?? null;
+}
+
+/**
+ * Mirrors `public.checkin_streak`: the run is anchored to today when today has
+ * been checked in, and to yesterday otherwise — so a streak survives a day that
+ * has not been claimed *yet* instead of reading 0 every morning. Drifting from
+ * this would make the number jump the moment a local couple pairs with the cloud.
+ */
+export function checkinStreak(days: readonly string[], today: string = todayKey()): number {
+  const checked = new Set(days.filter(isValidDateKey));
+  let cursor = checked.has(today) ? today : shiftDay(today, -1);
+  let streak = 0;
+  while (checked.has(cursor)) {
+    streak += 1;
+    cursor = shiftDay(cursor, -1);
+  }
+  return streak;
+}
+
+export function checkinStatusFrom(days: readonly string[], today: string = todayKey()): { streak: number; checkedToday: boolean } {
+  return { streak: checkinStreak(days, today), checkedToday: days.includes(today) };
 }
 
 export function relativeTime(value: string): string {

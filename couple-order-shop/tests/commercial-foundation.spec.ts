@@ -2,20 +2,27 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => {
+    localStorage.clear();
+    // The first-run guide is a modal; onboarding has its own test.
+    localStorage.setItem("couple-shop-onboarded", "1");
+  });
   await page.reload();
   await page.getByRole("button", { name: /我是大宝/ }).click();
 });
 
-test("account center exposes permanent login, recovery, phone and Apple paths", async ({ page }) => {
+test("account center exposes permanent login and recovery, and hides unconfigured providers", async ({ page }) => {
   await page.getByRole("button", { name: "我们", exact: true }).click();
   await page.getByRole("button", { name: /登录或注册账户|升级试用账户/ }).click();
 
   await expect(page.getByRole("dialog", { name: /创建正式账户|登录账户/ })).toBeVisible();
   await expect(page.getByLabel("邮箱")).toBeVisible();
   await expect(page.getByLabel("密码")).toBeVisible();
-  await expect(page.getByRole("button", { name: /手机号/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Apple/ })).toBeVisible();
+  // SMS and Apple need provider credentials this build does not carry, so the
+  // entry points must be absent rather than present-and-failing.
+  await expect(page.getByRole("button", { name: /手机号/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Apple/ })).toHaveCount(0);
+  await expect(page.getByText("其他登录方式")).toHaveCount(0);
 
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await page.getByRole("button", { name: "忘记密码？找回账户" }).click();
@@ -23,19 +30,36 @@ test("account center exposes permanent login, recovery, phone and Apple paths", 
   await expect(page.getByRole("button", { name: "发送重置邮件" })).toBeVisible();
 });
 
-test("memories include check-in, private photo and anniversary entry points", async ({ page }) => {
+test("the membership placeholder stays hidden and export is named for what it does", async ({ page }) => {
+  await page.getByRole("button", { name: "我们", exact: true }).click();
+  await expect(page.getByRole("button", { name: /基础版/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /导出数据/ })).toBeVisible();
+  await expect(page.getByText(/照片只含引用路径/)).toBeVisible();
+});
+
+test("memories include check-in and anniversary entry points", async ({ page }) => {
   await page.getByRole("button", { name: "回忆", exact: true }).click();
   await expect(page.getByText("连续签到")).toBeVisible();
   await expect(page.getByRole("button", { name: "签到 +1" })).toBeVisible();
 
-  await page.getByRole("button", { name: /收藏第一张合照/ }).click();
-  await expect(page.getByRole("dialog", { name: "收藏照片回忆" })).toBeVisible();
-  await expect(page.getByLabel("这张照片的故事")).toBeVisible();
-  await page.getByRole("dialog").press("Escape");
-
   await page.getByRole("button", { name: "添加", exact: true }).last().click();
   await expect(page.getByRole("dialog", { name: "添加纪念日" })).toBeVisible();
   await expect(page.getByLabel("纪念日名称")).toBeVisible();
+  // The form has to carry everything the list renders back, or "管理" would
+  // still be a one-way door.
+  await expect(page.getByRole("button", { name: "每年重复" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "仅这一次" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "当天", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "7 天", exact: true })).toBeVisible();
+});
+
+test("an unpaired shop explains the album instead of dead-ending in it", async ({ page }) => {
+  await page.getByRole("button", { name: "回忆", exact: true }).click();
+
+  // The picker used to open here and then toast 请先登录并连接双人小铺.
+  await expect(page.getByRole("button", { name: /收藏第一张合照/ })).toHaveCount(0);
+  await expect(page.getByText(/照片回忆需要双人空间|本地体验模式没有相册/)).toBeVisible();
+  await expect(page.getByText(/加密/)).toHaveCount(0);
 });
 
 test("privacy center explains security and data portability", async ({ page }) => {

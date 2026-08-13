@@ -2,7 +2,7 @@ import type { HomeIcon } from "@radix-ui/react-icons";
 
 export type Category = "food" | "care" | "date" | "limited";
 export type MainView = "shop" | "tasks" | "orders" | "memories" | "ours";
-export type OrderStatus = "pending" | "accepted" | "doing" | "done" | "rejected";
+export type OrderStatus = "pending" | "accepted" | "doing" | "done" | "rejected" | "cancelled";
 export type TaskFrequency = "daily" | "weekly";
 export type Identity = "大宝" | "二宝";
 export type AuthMode = "signin" | "signup" | "recover" | "new-password" | "phone";
@@ -23,12 +23,22 @@ export type MenuItem = {
   image?: string;
   tint: string;
   limited?: boolean;
+  /** Written by this couple rather than shipped with the shop; editable. */
+  custom?: boolean;
 };
+
+/** Prices a couple may put on their own wish, matching the server's check. */
+export const CUSTOM_PRICE_RANGE = { min: 8, max: 400 } as const;
+
+/** 限定券 stays a curated set: a self-issued "only once, ever" cannot be kept. */
+export const CUSTOM_CATEGORIES: Category[] = ["food", "care", "date"];
 
 export type Order = {
   id: string;
   itemId: string;
   itemName: string;
+  /** Recorded at order time so retiring a custom wish never rewrites history. */
+  itemCategory?: Category;
   image?: string;
   price: number;
   note: string;
@@ -39,7 +49,14 @@ export type Order = {
   to: string;
   /** Auth user id of the sender. Absent for local-mode and legacy orders. */
   createdBy?: string;
+  /** When the recipient finished it. Absent until an order reaches "done". */
+  completedAt?: string;
+  /** An optional sentence the recipient left when declining. */
+  declineNote?: string;
 };
+
+/** The real action a task is paid for, when the shop can actually witness it. */
+export type TaskRequirement = "photo" | "order-done" | "date-done";
 
 export type CoupleTask = {
   id: string;
@@ -49,6 +66,8 @@ export type CoupleTask = {
   reward: number;
   icon: typeof HomeIcon;
   tone: "pink" | "mint" | "gold" | "lavender";
+  /** Absent for the tasks nothing in the data can witness; those stay manual. */
+  requires?: TaskRequirement;
 };
 
 export type MemoryEntry = {
@@ -58,6 +77,8 @@ export type MemoryEntry = {
   imagePath?: string;
   imageUrl?: string;
   createdAt: string;
+  /** Auth user id of the uploader; only they may edit or delete the entry. */
+  createdBy?: string;
 };
 
 export type Anniversary = {
@@ -67,6 +88,9 @@ export type Anniversary = {
   repeatsYearly: boolean;
   reminderDays: number;
 };
+
+/** Order list tabs. "closed" holds the declined and the withdrawn together. */
+export type OrderFilter = "active" | "done" | "closed" | "all";
 
 export type CheckinStatus = {
   streak: number;

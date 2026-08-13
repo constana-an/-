@@ -21,10 +21,46 @@ npm run dev
    4. `supabase/migrations/20260811060000_commercial_foundation.sql`
    5. `supabase/migrations/20260811120000_timezone_refund_and_retention.sql`
    6. `supabase/migrations/20260811150000_personal_wallets.sql`
+   7. `supabase/migrations/20260811210000_manage_memories_and_anniversaries.sql`
+   8. `supabase/migrations/20260812010000_verified_tasks.sql`
+   9. `supabase/migrations/20260812030000_custom_wishes.sql`
+   10. `supabase/migrations/20260812060000_push_hygiene.sql`
+   11. `supabase/migrations/20260812080000_cancel_order.sql`
+   12. `supabase/migrations/20260812100000_pairing_bonus.sql`
 3. 复制 `.env.example` 为 `.env.local`，填写项目 URL 和 anon key。
 4. 生成一对 VAPID 密钥，把公钥填入 `VITE_WEB_PUSH_PUBLIC_KEY`。
 5. 将 `supabase/functions/notify-partner` 部署为 Edge Function，并设置 `VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`。
 6. 重新构建并部署到 HTTPS 地址；两台 iPhone 均用 Safari 打开，选择“添加到主屏幕”，再在“我们”页开启通知。
+
+> 第 7 步之前，另一半点纪念日的“管理”会静默失败（旧策略只允许创建者修改），回忆的文字也无法修正——该步同时补上 `memory_entries` 缺失的 `update` 授权，只有 RLS 策略而没有表授权时会直接报 permission denied。
+>
+> 第 8 步给订单加上 `completed_at`，并让「记录合照 / 完成订单 / 完成约会」三个任务在服务端校验真实行为；未执行时这三个任务仍可空手领取。
+>
+> 第 9 步加入自定义心愿表，并把心愿分类写进订单行；未执行时点自定义心愿会报「这个心愿暂时下架了」。
+>
+> 第 10 步补上 `push_subscriptions` 的表授权——只有 RLS 策略而没有授权时，退出登录删不掉自己的订阅行，这台手机会继续收到那对情侣的推送。
+>
+> 第 11 步加入「撤回订单」（新状态 + `cancel_couple_order`）和婉拒理由字段，同时把 `update_order_status` 换成三参数版本（**旧的两参数版本会被 drop**，否则调用会歧义）。未执行时撤回按钮会报错。
+>
+> 第 12 步在配对完成时给双方各发 20 甜心币（8 + 20 = 28，正好够当天点第一份最便宜的心愿）。只在第二个人加入的那一次发放，按 `couples.pairing_bonus_at` 去重，解除配对后重新加入不会再发；本地模式没有这笔奖励，因为本地模式的币不经过服务端。
+>
+> 订单表本身在第 5 步（`20260811120000`）就已经收口：直接写 `orders` 的策略被删除，`insert/update/delete` 授权也已从 `anon`、`authenticated` 收回，所有下单与状态流转只能走 `place_couple_order` / `update_order_status` 两个 SECURITY DEFINER 函数。
+
+### 环境变量
+
+| 变量 | 必填 | 说明 |
+| --- | --- | --- |
+| `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | 云同步必填 | 留空即进入本地体验模式，不加载 Supabase 客户端。 |
+| `VITE_WEB_PUSH_PUBLIC_KEY` | 推送必填 | VAPID 公钥，缺失时通知仍可开启，但不会注册后台推送订阅。 |
+| `VITE_AUTH_PHONE_ENABLED` | 否，默认 `0` | 置 `1` 才显示手机号登录入口，需先在 Supabase 配置短信服务商。 |
+| `VITE_AUTH_APPLE_ENABLED` | 否，默认 `0` | 置 `1` 才显示 Apple 登录入口，需先配置 Apple Developer 凭据。 |
+| `VITE_MEMBERSHIP_ENABLED` | 否，默认 `0` | 置 `1` 才显示会员权益入口；支付通道接通前保持关闭。 |
+
+三个开关都要求云配置存在，未接通的登录方式与会员入口会整块隐藏，而不是显示后失败。
+
+### 发版
+
+改动应用外壳（HTML、图标、`public/` 资源）后，请提升 `public/sw.js` 里的 `CACHE` 版本号；`activate` 会删除所有其它版本的缓存，这是已添加到主屏幕的设备拿到新版本的唯一途径。
 
 第一台手机点击“创建情侣小铺”得到六位情侣码，第二台手机输入该码即可加入。
 
@@ -40,9 +76,12 @@ npm run dev
 - 每人每天最多 8 枚、每周额外最多 29 枚，全勤一周 85 枚；正常（非全勤）参与一周通常落在 30–50 枚。
 - 食物兑换为 28–78 枚；服务为 48–118 枚；约会为 60–188 枚；限定券为 120–360 枚。
 - 限定券每对情侣**永久只能使用一次**（不区分谁点的），已用过的会在小铺里置灰。
+- **自定义心愿**：除限定券外的三个分类都可以写自己的心愿，价格 8–400 甜心币，两个人都能改、都能下架。价格由服务端从 `custom_menu_items` 读取，客户端报的价不作数。限定券保持固定名录——自己发的「永久只能用一次」没人能替你守住。下架不影响已经点过的订单：订单行自带名字、价格和分类。
 - 下单从**下单人自己**的钱包扣币；被婉拒时原路退回给下单人，收单方的余额不受影响。只有收到订单的一方可以接单、婉拒或推进状态。
 - 每个人只能看到自己的余额；`profiles` 的 RLS 只放行 `user_id = auth.uid()`。
 - 任务与签到的日期周期以 `Asia/Shanghai` 为准（见 `src/lib/date.ts` 与 `public.app_today()`），前后端使用同一套周期键。
+- **三个任务要真的做过才能领**：「记录一张本周合照」需要本人本周上传过照片；「认真完成一份订单」需要本人本周完成过一份对方点的心愿；「完成一次用心约会」还要求那份心愿属于「去约会」分类。判断以 `orders.completed_at` 为准，由 `update_order_status` 打戳。其余五个任务（早安晚安、夸奖、分享心情、专心陪伴、一起散步）数据里无从佐证，继续按自觉领取。
+- 校验同时存在于客户端（按钮显示「待完成」并说明缺什么）和 `claim_couple_task`（真正发币的一方）。本地体验模式没有相册，合照任务在本地模式不做校验。
 
 ## 目录结构
 
@@ -58,12 +97,23 @@ npm run dev
 npm test
 ```
 
-`npm test` 依次执行运行时完整性检查、日期逻辑单测（分别在美东与北京时区各跑一遍）、Sites worker 测试和 Playwright 交互测试。也可以单独运行：
+`npm test` 依次执行运行时完整性检查、日期逻辑单测（分别在美东与北京时区各跑一遍）、RLS 策略与授权检查、Sites worker 测试和 Playwright 交互测试。也可以单独运行：
 
 ```bash
 npm run check:runtime
 npm run test:logic
+npm run test:sql
 npm run build
 npm run test:sites
 npm run test:runtime
 ```
+
+另有一套**需要凭据、不进 `npm test`** 的真实云端集成测试，覆盖双账户配对、RLS 隔离、订单状态机与退款、任务真实性校验、纪念日双方共管、推送订阅隔离和 Edge Function 可达性：
+
+```bash
+SUPABASE_URL=https://xxx.supabase.co SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... npm run test:cloud
+```
+
+它会用 service role 自建三个一次性账号（两位伴侣 + 一个局外人）、跑完后删除，并在开始前给钱包充值——新账号只有 8 币，而最便宜的心愿要 28 币。**只指向测试项目**：过程中会真实写入订单、回忆和纪念日。缺少任一环境变量时整组自动跳过并提示。
+
+`npm run test:sql` 不连数据库：它按 README 的顺序重放 `schema.sql` 与全部 migration，算出最终的策略与授权，确保写路径没有被悄悄放开、也没有只加策略却漏掉表授权（Postgres 先查表授权再查 RLS，漏掉就会直接 permission denied）。
