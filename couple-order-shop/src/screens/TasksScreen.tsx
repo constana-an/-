@@ -1,5 +1,5 @@
-import { CheckIcon, HeartFilledIcon, LockClosedIcon, MoonIcon, TargetIcon } from "@radix-ui/react-icons";
-import { TASKS, WEEKLY_PERSONAL_GOAL, requirementHint, taskClaimKey, taskRequirementMet } from "../lib/catalog";
+import { ChatBubbleIcon, CheckIcon, HeartFilledIcon, LightningBoltIcon, LockClosedIcon, MoonIcon, TargetIcon } from "@radix-ui/react-icons";
+import { TASKS, WEEKLY_PERSONAL_GOAL, promptOfDay, requirementHint, taskClaimKey, taskRequirementMet } from "../lib/catalog";
 import { todayKey, weekKey } from "../lib/date";
 import type { CoupleTask, MemoryEntry, Order } from "../lib/types";
 
@@ -34,6 +34,7 @@ export function TasksScreen({
   }, 0);
   const progress = Math.min(100, Math.round((earnedThisWeek / WEEKLY_PERSONAL_GOAL) * 100));
   const context = { orders, memories, currentName, currentUserId, memoriesTracked };
+  const prompt = promptOfDay();
 
   const renderTask = (task: CoupleTask) => {
     const claimed = claimedTasks.includes(taskClaimKey(task));
@@ -62,6 +63,14 @@ export function TasksScreen({
         <p>每个人有自己的甜心币钱包，各攒各的，也各花各的。</p>
         <div className="task-progress" aria-label={`本周进度 ${progress}%`}><span style={{ width: `${progress}%` }} /></div>
         <div className="task-balance"><HeartFilledIcon /><strong>{coins}</strong><span>我的甜心币</span></div>
+      </div>
+
+      {/* The four daily tasks never change; this does, and both phones show the
+          same one so "今天聊这个" actually means something. */}
+      <div className="daily-prompt">
+        <span className="daily-prompt-tag"><ChatBubbleIcon /> 今天聊点什么</span>
+        <p>{prompt.topic}</p>
+        <div className="daily-prompt-action"><LightningBoltIcon /> 小行动：{prompt.action}</div>
       </div>
 
       <div className="task-heading"><div><span>每天零点刷新</span><h2>我的今日任务</h2></div><strong>{daily.filter((task) => claimedTasks.includes(taskClaimKey(task))).length}/{daily.length}</strong></div>

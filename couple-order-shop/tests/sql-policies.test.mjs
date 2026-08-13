@@ -9,7 +9,7 @@ const migrationsDir = join(root, "supabase", "migrations");
 
 /** The SQL a fresh project runs, in the order the README tells you to run it. */
 function sqlInApplyOrder() {
-  const files = ["../schema.sql", ...readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort()];
+  const files = readdirSync(migrationsDir).filter((name) => name.endsWith(".sql")).sort();
   return files.map((name) => readFileSync(join(migrationsDir, name), "utf8")).join("\n");
 }
 

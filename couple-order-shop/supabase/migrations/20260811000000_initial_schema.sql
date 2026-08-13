@@ -75,23 +75,31 @@ alter table public.push_subscriptions enable row level security;
 alter table public.task_catalog enable row level security;
 alter table public.task_claims enable row level security;
 
+drop policy if exists "read own profile" on public.profiles;
 create policy "read own profile" on public.profiles for select using (user_id = auth.uid());
+drop policy if exists "read own couple" on public.couples;
 create policy "read own couple" on public.couples for select using (
   exists (select 1 from public.profiles p where p.user_id = auth.uid() and p.couple_id = couples.id)
 );
+drop policy if exists "read couple orders" on public.orders;
 create policy "read couple orders" on public.orders for select using (
   exists (select 1 from public.profiles p where p.user_id = auth.uid() and p.couple_id = orders.couple_id)
 );
+drop policy if exists "create couple orders" on public.orders;
 create policy "create couple orders" on public.orders for insert with check (
   created_by = auth.uid() and exists (select 1 from public.profiles p where p.user_id = auth.uid() and p.couple_id = orders.couple_id)
 );
+drop policy if exists "update couple orders" on public.orders;
 create policy "update couple orders" on public.orders for update using (
   exists (select 1 from public.profiles p where p.user_id = auth.uid() and p.couple_id = orders.couple_id)
 );
+drop policy if exists "manage own push subscription" on public.push_subscriptions;
 create policy "manage own push subscription" on public.push_subscriptions for all using (user_id = auth.uid()) with check (
   user_id = auth.uid() and exists (select 1 from public.profiles p where p.user_id = auth.uid() and p.couple_id = push_subscriptions.couple_id)
 );
+drop policy if exists "read task catalog" on public.task_catalog;
 create policy "read task catalog" on public.task_catalog for select using (true);
+drop policy if exists "read couple task claims" on public.task_claims;
 create policy "read couple task claims" on public.task_claims for select using (
   exists (select 1 from public.profiles p where p.user_id = auth.uid() and p.couple_id = task_claims.couple_id)
 );

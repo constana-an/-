@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { TASKS, taskRequirementMet } from "../src/lib/catalog.ts";
+import { TASKS, WISH_TEMPLATES, promptOfDay, taskRequirementMet } from "../src/lib/catalog.ts";
 import { todayKey, weekKey } from "../src/lib/date.ts";
 
 const taskFor = (id) => TASKS.find((task) => task.id === id);
@@ -89,4 +89,24 @@ test("the date task additionally requires a 去约会 wish", () => {
   const task = taskFor("date-task");
   assert.equal(taskRequirementMet(task, context({ orders: [doneOrder()] })), false);
   assert.equal(taskRequirementMet(task, context({ orders: [doneOrder({ itemId: "movie", itemName: "电影之夜" })] })), true);
+});
+
+test("both phones get the same daily prompt, and it changes with the day", () => {
+  // Derived from the calendar day alone: if it depended on the identity or the
+  // wallet, "今天聊这个" would mean two different things on the two phones.
+  assert.deepEqual(promptOfDay("2026-08-13"), promptOfDay("2026-08-13"));
+  const week = ["2026-08-13", "2026-08-14", "2026-08-15", "2026-08-16", "2026-08-17"]
+    .map((day) => promptOfDay(day).topic);
+  assert.equal(new Set(week).size, week.length, "a week should not repeat itself");
+  for (const prompt of week) assert.ok(prompt.length > 0);
+});
+
+test("every wish template fits the rules the server enforces", () => {
+  for (const template of WISH_TEMPLATES) {
+    assert.ok(template.name.length >= 1 && template.name.length <= 20, template.name);
+    assert.ok(template.description.length <= 40, template.name);
+    assert.ok(template.price >= 8 && template.price <= 400, template.name);
+    // 限定券 is a curated set; a template must never point there.
+    assert.notEqual(template.category, "limited");
+  }
 });

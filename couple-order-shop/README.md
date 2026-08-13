@@ -14,37 +14,45 @@ npm run dev
 ## 免费双人同步
 
 1. 创建 Supabase 免费项目。**不需要**开启 Anonymous Sign-ins：创建和加入双人小铺都要求正式账户，换手机后才能凭账户恢复数据。
-2. 在 SQL Editor 中**按顺序**执行：
-   1. `supabase/schema.sql`
-   2. `supabase/migrations/20260811013000_place_couple_order.sql`
-   3. `supabase/migrations/20260811030000_couple_profile.sql`
-   4. `supabase/migrations/20260811060000_commercial_foundation.sql`
-   5. `supabase/migrations/20260811120000_timezone_refund_and_retention.sql`
-   6. `supabase/migrations/20260811150000_personal_wallets.sql`
-   7. `supabase/migrations/20260811210000_manage_memories_and_anniversaries.sql`
-   8. `supabase/migrations/20260812010000_verified_tasks.sql`
-   9. `supabase/migrations/20260812030000_custom_wishes.sql`
-   10. `supabase/migrations/20260812060000_push_hygiene.sql`
-   11. `supabase/migrations/20260812080000_cancel_order.sql`
-   12. `supabase/migrations/20260812100000_pairing_bonus.sql`
+2. 应用数据库迁移（见下面「数据库迁移」）：
+
+   ```bash
+   npx supabase link --project-ref <你的项目 ref>
+   npx supabase db push
+   ```
 3. 复制 `.env.example` 为 `.env.local`，填写项目 URL 和 anon key。
 4. 生成一对 VAPID 密钥，把公钥填入 `VITE_WEB_PUSH_PUBLIC_KEY`。
 5. 将 `supabase/functions/notify-partner` 部署为 Edge Function，并设置 `VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`。
 6. 重新构建并部署到 HTTPS 地址；两台 iPhone 均用 Safari 打开，选择“添加到主屏幕”，再在“我们”页开启通知。
 
-> 第 7 步之前，另一半点纪念日的“管理”会静默失败（旧策略只允许创建者修改），回忆的文字也无法修正——该步同时补上 `memory_entries` 缺失的 `update` 授权，只有 RLS 策略而没有表授权时会直接报 permission denied。
->
-> 第 8 步给订单加上 `completed_at`，并让「记录合照 / 完成订单 / 完成约会」三个任务在服务端校验真实行为；未执行时这三个任务仍可空手领取。
->
-> 第 9 步加入自定义心愿表，并把心愿分类写进订单行；未执行时点自定义心愿会报「这个心愿暂时下架了」。
->
-> 第 10 步补上 `push_subscriptions` 的表授权——只有 RLS 策略而没有授权时，退出登录删不掉自己的订阅行，这台手机会继续收到那对情侣的推送。
->
-> 第 11 步加入「撤回订单」（新状态 + `cancel_couple_order`）和婉拒理由字段，同时把 `update_order_status` 换成三参数版本（**旧的两参数版本会被 drop**，否则调用会歧义）。未执行时撤回按钮会报错。
->
-> 第 12 步在配对完成时给双方各发 20 甜心币（8 + 20 = 28，正好够当天点第一份最便宜的心愿）。只在第二个人加入的那一次发放，按 `couples.pairing_bonus_at` 去重，解除配对后重新加入不会再发；本地模式没有这笔奖励，因为本地模式的币不经过服务端。
->
-> 订单表本身在第 5 步（`20260811120000`）就已经收口：直接写 `orders` 的策略被删除，`insert/update/delete` 授权也已从 `anon`、`authenticated` 收回，所有下单与状态流转只能走 `place_couple_order` / `update_order_status` 两个 SECURITY DEFINER 函数。
+### 数据库迁移
+
+`supabase/migrations/` 是唯一的数据库真相来源，文件名即执行顺序。**每个迁移都必须可以重复执行**——`npm run check:migrations` 会在每次 `npm test` 时静态检查这一点（策略必须先 `drop policy if exists`、建表必须 `if not exists`、加列必须有守卫、`create function` 必须是 `or replace` 或先 drop）。这条规则的意义是：任何一个只能在空库上跑通的语句，都会让第一次重跑在中途炸掉，把 schema 停在改了一半的状态。
+
+| 场景 | 做法 |
+| --- | --- |
+| 新项目 | `npx supabase link --project-ref <ref>` 然后 `npx supabase db push` |
+| 已有项目、之前手工执行过 | 先 `npx supabase migration repair --status applied <每个已执行的版本号>`，再 `db push` 只跑剩下的 |
+| 不想用 CLI | 按文件名顺序把 `supabase/migrations/*.sql` 逐个贴进 SQL Editor；因为都可重复执行，重复贴一次也不会坏 |
+| 新增迁移 | `npx supabase migration new <名字>`，写完跑 `npm run check:migrations` |
+
+各步的作用，以及**没执行**时会看到什么：
+
+| 迁移 | 作用 | 未执行的症状 |
+| --- | --- | --- |
+| `20260811000000_initial_schema.sql` | 表、RLS、配对与下单基础 | 什么都用不了 |
+| `20260811013000_place_couple_order.sql`<br>`20260811030000_couple_profile.sql` | 下单与资料 RPC | 下单、改资料失败 |
+| `20260811060000_commercial_foundation.sql` | 账户、回忆、纪念日、审计、限流 | 登录后功能大面积缺失 |
+| `20260811120000_timezone_refund_and_retention.sql` | 统一时区、婉拒退款、关闭订单直写 | 周期键前后端不一致；订单可被绕过 RPC 直写 |
+| `20260811150000_personal_wallets.sql` | 每人一个钱包 | 双方共用一个余额 |
+| `20260811210000_manage_memories_and_anniversaries.sql` | 双方共管纪念日；回忆可改（含缺失的 `update` 授权） | 另一半点「管理」静默失败；改文字报 permission denied |
+| `20260812010000_verified_tasks.sql` | `completed_at`；三个任务服务端校验 | 合照/订单/约会任务可空手领取 |
+| `20260812030000_custom_wishes.sql` | 自定义心愿表；分类写进订单行 | 点自定义心愿报「这个心愿暂时下架了」 |
+| `20260812060000_push_hygiene.sql` | `push_subscriptions` 表授权 | 退出登录删不掉订阅，手机继续收到那对情侣的推送 |
+| `20260812080000_cancel_order.sql` | 撤回订单、婉拒理由；`update_order_status` 换三参数版（**旧两参数版会被 drop**，否则调用歧义） | 撤回按钮报错 |
+| `20260812100000_pairing_bonus.sql` | 配对完成时双方各 20 币（8 + 20 = 28，当天就能点第一份） | 新情侣要攒三四天才能下第一单 |
+
+> 订单表在 `20260811120000` 就已经收口：直接写 `orders` 的策略被删除，`insert/update/delete` 授权也已从 `anon`、`authenticated` 收回，所有下单与状态流转只能走 `place_couple_order` / `update_order_status` 两个 SECURITY DEFINER 函数。
 
 ### 环境变量
 
@@ -97,10 +105,11 @@ npm run dev
 npm test
 ```
 
-`npm test` 依次执行运行时完整性检查、日期逻辑单测（分别在美东与北京时区各跑一遍）、RLS 策略与授权检查、Sites worker 测试和 Playwright 交互测试。也可以单独运行：
+`npm test` 依次执行运行时完整性检查、迁移可重放检查、日期逻辑单测（分别在美东与北京时区各跑一遍）、RLS 策略与授权检查、Sites worker 测试和 Playwright 交互测试。也可以单独运行：
 
 ```bash
 npm run check:runtime
+npm run check:migrations
 npm run test:logic
 npm run test:sql
 npm run build
@@ -116,4 +125,4 @@ SUPABASE_URL=https://xxx.supabase.co SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE
 
 它会用 service role 自建三个一次性账号（两位伴侣 + 一个局外人）、跑完后删除，并在开始前给钱包充值——新账号只有 8 币，而最便宜的心愿要 28 币。**只指向测试项目**：过程中会真实写入订单、回忆和纪念日。缺少任一环境变量时整组自动跳过并提示。
 
-`npm run test:sql` 不连数据库：它按 README 的顺序重放 `schema.sql` 与全部 migration，算出最终的策略与授权，确保写路径没有被悄悄放开、也没有只加策略却漏掉表授权（Postgres 先查表授权再查 RLS，漏掉就会直接 permission denied）。
+`npm run test:sql` 不连数据库：它按文件名顺序重放 `supabase/migrations/` 的全部迁移，算出最终的策略与授权，确保写路径没有被悄悄放开、也没有只加策略却漏掉表授权（Postgres 先查表授权再查 RLS，漏掉就会直接 permission denied）。

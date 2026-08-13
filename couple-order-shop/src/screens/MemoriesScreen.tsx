@@ -28,6 +28,8 @@ export function MemoriesScreen({
   onEditAnniversary,
   paired,
   onPair,
+  onPlanDate,
+  onWriteWish,
 }: {
   orders: Order[];
   profile: CoupleProfile;
@@ -42,6 +44,8 @@ export function MemoriesScreen({
   /** Photos need the couple's private bucket; everything else works offline. */
   paired: boolean;
   onPair: () => void;
+  onPlanDate: () => void;
+  onWriteWish: () => void;
 }) {
   const done = orders.filter((order) => order.status === "done");
   // The hero counts this calendar month; the all-time total gets its own tile so
@@ -109,6 +113,18 @@ export function MemoriesScreen({
             <div><span><CalendarIcon /></span><div><small>下一个纪念日</small><strong>{nextAnniversary.title}</strong><p>{nextAnniversary.eventDate} · {anniversaryHint(nextAnniversary)}</p></div></div>
             <button onClick={() => onEditAnniversary(nextAnniversary)}>管理</button>
           </div>
+          {/* Once it is close enough to be reminded about, the useful thing is
+              not another reminder — it is somewhere to start. */}
+          {daysUntilAnniversary(nextAnniversary.eventDate, nextAnniversary.repeatsYearly) <= nextAnniversary.reminderDays && (
+            <div className="anniversary-ideas">
+              <strong>为「{nextAnniversary.title}」做点什么？</strong>
+              <div className="anniversary-idea-row">
+                <button onClick={onPlanDate}>订一个约会</button>
+                <button onClick={onWriteWish}>写一份专属心愿</button>
+                <button onClick={paired ? onAddMemory : onPair}>上传一张照片</button>
+              </div>
+            </div>
+          )}
           <div className="anniversary-list">
             {sortedAnniversaries.map((item) => (
               <button type="button" key={item.id} onClick={() => onEditAnniversary(item)} aria-label={`编辑纪念日 ${item.title}`}>

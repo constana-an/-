@@ -111,6 +111,50 @@ export const WEEKLY_PERSONAL_GOAL = TASKS.reduce(
   0,
 );
 
+/**
+ * The four daily tasks never change, so after a month they read as chores. This
+ * rotates something to talk about and something small to do, on top of them.
+ *
+ * Derived from the calendar day alone, never from the identity: both phones
+ * must land on the same pair, or "今天聊这个" means nothing.
+ */
+export const DAILY_PROMPTS: Array<{ topic: string; action: string }> = [
+  { topic: "你最近一次觉得被我照顾到，是什么时候？", action: "把那件事再做一次" },
+  { topic: "如果这周末可以什么都不做，你想怎么过？", action: "在日历上圈出那半天" },
+  { topic: "我身上有什么小习惯是你偷偷喜欢的？", action: "今天说出口一次" },
+  { topic: "最近有什么事你其实想说，但一直没说？", action: "认真听完，不打断" },
+  { topic: "我们第一次见面，你记得的第一个细节是什么？", action: "翻出那天的一张照片" },
+  { topic: "你最近在忙的事情里，哪一件最耗心力？", action: "替对方分掉一件小事" },
+  { topic: "有没有哪句话，我说过之后你记了很久？", action: "今天再写一句给对方" },
+  { topic: "如果明年这个时候，我们一起去一个地方，你想去哪？", action: "把它记进心愿单" },
+  { topic: "你觉得我们相处里，最舒服的时刻是什么样的？", action: "今晚复刻那个时刻" },
+  { topic: "最近有什么让你笑出声的小事？", action: "讲给对方听" },
+  { topic: "你希望被安慰的时候，我怎么做最有用？", action: "记下来，下次照做" },
+  { topic: "我们之间有什么只有彼此懂的暗号或梗？", action: "今天用一次" },
+  { topic: "你最近对自己满意的一件事是什么？", action: "认真夸对方这一点" },
+  { topic: "如果今天可以重来一次，你想改哪一小段？", action: "一起把它过成想要的样子" },
+];
+
+/** Same day, same prompt, on both phones. */
+export function promptOfDay(day: string = todayKey()): { topic: string; action: string } {
+  let hash = 0;
+  for (const char of day) hash = (hash * 31 + char.charCodeAt(0)) % 100_000;
+  return DAILY_PROMPTS[hash % DAILY_PROMPTS.length];
+}
+
+/**
+ * Starting points for a couple's own wish. A blank form asks people to be
+ * inventive on the spot, which is exactly when nothing comes to mind.
+ */
+export const WISH_TEMPLATES: Array<{ name: string; description: string; price: number; category: Category }> = [
+  { name: "陪我散步", description: "不赶路，走到哪算哪", price: 30, category: "date" },
+  { name: "一起做饭", description: "一个人洗菜，一个人掌勺", price: 48, category: "date" },
+  { name: "认真听我说十分钟", description: "不给建议，只听着", price: 36, category: "care" },
+  { name: "帮我按按肩膀", description: "十分钟就够，认真一点", price: 40, category: "care" },
+  { name: "带一份宵夜回来", description: "什么都行，是你挑的就好", price: 32, category: "food" },
+  { name: "一起看一集剧", description: "不看手机，看完聊两句", price: 28, category: "date" },
+];
+
 export const categoryMeta: Array<{ id: Category; label: string; subtitle: string; icon: typeof HomeIcon }> = [
   { id: "food", label: "点吃的", subtitle: "想吃就许愿", icon: HomeIcon },
   { id: "care", label: "点服务", subtitle: "今天想被偏爱", icon: HeartIcon },

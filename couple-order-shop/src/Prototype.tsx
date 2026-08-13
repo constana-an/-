@@ -21,7 +21,7 @@ import {
   TrashIcon,
 } from "@radix-ui/react-icons";
 import { BottomSheet, KeyboardInput, MobileScroll, useKeyboard } from "./mobile";
-import { DESIRED_TIMES, MENU, categoryMeta, statusText, taskClaimKey } from "./lib/catalog";
+import { DESIRED_TIMES, MENU, WISH_TEMPLATES, categoryMeta, statusText, taskClaimKey } from "./lib/catalog";
 import { dayKeyOf, formatStartedOn, isValidDateKey, normalizeDateInput, todayKey } from "./lib/date";
 import { checkinStatusFrom, checkinStreak, dueAnniversaries } from "./lib/date";
 import { authErrorMessage, orderErrorMessage, orderStatusErrorMessage, rewardErrorMessage } from "./lib/errors";
@@ -1631,6 +1631,8 @@ export default function Prototype() {
               onEditAnniversary={openEditAnniversary}
               paired={Boolean(cloudCoupleId)}
               onPair={() => setView("ours")}
+              onPlanDate={() => { setCategory("date"); setView("shop"); }}
+              onWriteWish={() => { openAddWish(); setView("shop"); }}
             />
           )}
           {view === "ours" && (
@@ -1693,6 +1695,23 @@ export default function Prototype() {
 
       <BottomSheet open={wishOpen} onOpenChange={(open) => (open ? setWishOpen(true) : closeWish())} title={editingWishId ? "修改这个心愿" : "写一个我们的心愿"} description={`价格 ${CUSTOM_PRICE_RANGE.min}–${CUSTOM_PRICE_RANGE.max} 甜心币，两个人都能修改`}>
         <div className="memory-form">
+          {/* A blank form asks people to be inventive on the spot, which is
+              exactly when nothing comes to mind. */}
+          {!editingWishId && (
+            <div className="wish-templates">
+              <span>从一个例子开始</span>
+              <div className="wish-template-row">
+                {WISH_TEMPLATES.map((template) => (
+                  <button
+                    key={template.name}
+                    onClick={() => setWishDraft({ name: template.name, description: template.description, price: String(template.price), category: template.category })}
+                  >
+                    {template.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <label className="account-field" htmlFor="wish-name"><span>心愿名字</span><KeyboardInput id="wish-name" value={wishDraft.name} maxLength={20} onChange={(event) => setWishDraft((current) => ({ ...current, name: event.target.value }))} placeholder="例如：陪我去菜市场" /></label>
           <label className="account-field" htmlFor="wish-desc"><span>一句话介绍</span><KeyboardInput id="wish-desc" value={wishDraft.description} maxLength={40} onChange={(event) => setWishDraft((current) => ({ ...current, description: event.target.value }))} placeholder="例如：挑晚饭的菜，顺便牵手" /></label>
           <div className="option-field">
