@@ -15,7 +15,6 @@ import {
   shiftDay,
   normalizeDateInput,
   relationshipDays,
-  savingHint,
   todayKey,
   weekKey,
 } from "../src/lib/date.ts";
@@ -161,8 +160,3 @@ test("start dates render as Chinese copy", () => {
   assert.equal(formatStartedOn(""), "尚未设置");
 });
 
-test("saving hints scale from days to weeks", () => {
-  assert.equal(savingHint(28), "约攒 5 天");
-  assert.equal(savingHint(12), "约攒 3 天");
-  assert.equal(savingHint(360), "约攒 9 周");
-});

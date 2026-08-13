@@ -169,14 +169,3 @@ export function relativeTime(value: string): string {
   if (minutes < 1440) return `${Math.floor(minutes / 60)} 小时前`;
   return `${Math.floor(minutes / 1440)} 天前`;
 }
-
-/**
- * Rough "how long do we have to save" hint. Assumes the couple earns around
- * 6 coins a day at partial participation, which is unchanged by the per-person
- * task split because each side now earns half of the old single-side reward.
- */
-export function savingHint(price: number): string {
-  const days = Math.ceil(price / 6);
-  if (days <= 7) return `约攒 ${Math.max(3, days)} 天`;
-  return `约攒 ${Math.ceil(days / 7)} 周`;
-}

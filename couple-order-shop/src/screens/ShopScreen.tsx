@@ -1,7 +1,6 @@
 import { CheckIcon, HeartFilledIcon, MagicWandIcon, Pencil1Icon, PlusIcon } from "@radix-ui/react-icons";
 import { Carousel } from "../shell";
 import { MENU, categoryMeta } from "../lib/catalog";
-import { savingHint } from "../lib/date";
 import type { Category, MenuItem } from "../lib/types";
 import { MenuArt } from "./MenuArt";
 
@@ -86,7 +85,7 @@ export function ShopScreen({
                   <p>{item.description}</p>
                   <div className="price-meta">
                     <div className="price-pill"><HeartFilledIcon /> {item.price}</div>
-                    <span>{used ? "这张券已经用掉了" : savingHint(item.price)}</span>
+                    {used && <span>这张券已经用掉了</span>}
                   </div>
                 </div>
                 <button
