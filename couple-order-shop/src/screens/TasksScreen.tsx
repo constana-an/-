@@ -1,7 +1,7 @@
 import { ChatBubbleIcon, CheckIcon, HeartFilledIcon, LightningBoltIcon, LockClosedIcon, MoonIcon, TargetIcon } from "@radix-ui/react-icons";
-import { TASKS, WEEKLY_PERSONAL_GOAL, promptOfDay, requirementHint, taskClaimKey, taskRequirementMet } from "../lib/catalog";
-import { todayKey, weekKey } from "../lib/date";
-import type { CoupleTask, MemoryEntry, Order } from "../lib/types";
+import { TASKS, WEEKLY_PERSONAL_GOAL, earnedInWeek, promptOfDay, requirementHint, taskClaimKey, taskRequirementMet } from "../lib/catalog";
+import type { CoupleTask, MemoryEntry, Order, PartnerStatus } from "../lib/types";
+import { PartnerCard } from "./PartnerCard";
 
 export function TasksScreen({
   coins,
@@ -12,6 +12,7 @@ export function TasksScreen({
   currentName,
   currentUserId,
   memoriesTracked,
+  partner,
 }: {
   coins: number;
   /** Only the current person's claims — both partners earn their own rewards. */
@@ -22,16 +23,12 @@ export function TasksScreen({
   currentName: string;
   currentUserId?: string;
   memoriesTracked: boolean;
+  /** The other person's week, or null when nobody is paired yet. */
+  partner: PartnerStatus | null;
 }) {
   const daily = TASKS.filter((task) => task.frequency === "daily");
   const weekly = TASKS.filter((task) => task.frequency === "weekly");
-  const monday = weekKey();
-  const now = todayKey();
-  const earnedThisWeek = claimedTasks.reduce((sum, key) => {
-    const [period, id] = key.split(":");
-    if (period < monday || period > now) return sum;
-    return sum + (TASKS.find((task) => task.id === id)?.reward ?? 0);
-  }, 0);
+  const earnedThisWeek = earnedInWeek(claimedTasks);
   const progress = Math.min(100, Math.round((earnedThisWeek / WEEKLY_PERSONAL_GOAL) * 100));
   const context = { orders, memories, currentName, currentUserId, memoriesTracked };
   const prompt = promptOfDay();
@@ -64,6 +61,8 @@ export function TasksScreen({
         <div className="task-progress" aria-label={`本周进度 ${progress}%`}><span style={{ width: `${progress}%` }} /></div>
         <div className="task-balance"><HeartFilledIcon /><strong>{coins}</strong><span>我的甜心币</span></div>
       </div>
+
+      <PartnerCard status={partner} />
 
       {/* The four daily tasks never change; this does, and both phones show the
           same one so "今天聊这个" actually means something. */}

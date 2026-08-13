@@ -136,6 +136,41 @@ describe("cloud integration", { skip }, () => {
     assert.equal(rows[0].user_id, users.a.id);
   });
 
+  it("shows each partner the other's week without their wallet", async () => {
+    // B earns something so there is a number to see.
+    const { error: claimError } = await session.b.rpc("claim_couple_task", { p_task_id: "morning" }).single();
+    assert.equal(claimError, null, `claim_couple_task failed: ${claimError?.message}`);
+    await session.b.rpc("daily_checkin").single();
+
+    const { data, error } = await session.a.rpc("get_partner_status").maybeSingle();
+    assert.equal(error, null, `get_partner_status failed: ${error?.message}`);
+    assert.equal(data.display_name, "二宝");
+    assert.equal(data.earned_this_week, 1, "the +1 morning task is this week's only claim");
+    assert.equal(data.checked_today, true);
+    assert.ok(data.streak >= 1);
+    // The whole point of the function: it is a window, not an open door.
+    assert.equal("coin_balance" in data, false, "the partner window must never carry a balance");
+  });
+
+  it("caps how many wishes one couple can write", async () => {
+    const { data: existing } = await session.a.from("custom_menu_items").select("id");
+    const room = 30 - existing.length;
+    const rows = Array.from({ length: room }, (_, index) => ({
+      couple_id: coupleId, created_by: users.a.id, category: "food",
+      name: `填充心愿 ${index}`, description: "", price: 30,
+    }));
+    if (rows.length) {
+      const { error } = await session.a.from("custom_menu_items").insert(rows);
+      assert.equal(error, null, `filling to the cap failed: ${error?.message}`);
+    }
+    const { error: overflow } = await session.a.from("custom_menu_items").insert({
+      couple_id: coupleId, created_by: users.a.id, category: "food",
+      name: "第 31 个", description: "", price: 30,
+    });
+    assert.match(overflow?.message ?? "", /custom wish limit reached/);
+    await admin.from("custom_menu_items").delete().eq("couple_id", coupleId);
+  });
+
   it("debits the sender's own wallet when an order is placed", async () => {
     const before = await balanceOf(session.a);
     const { id, error } = await placeOrder(session.a, { from: "大宝", to: "二宝" });

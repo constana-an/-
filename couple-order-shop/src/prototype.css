@@ -366,6 +366,33 @@ button:focus-visible { outline: 3px solid rgba(240, 111, 148, .32); outline-offs
 .locked-section p { margin: 6px 0 0; color: #a99da4; font-size: 12px; line-height: 1.7; }
 .locked-section button { min-height: 44px; margin-top: 12px; padding: 0 16px; border: 0; border-radius: 12px; background: #f0eaff; color: #7f62ac; font-size: 12px; font-weight: 700; }
 
+/* The partner's week, mounted directly under your own so the two read as a
+   pair. Green throughout: the pink half of the tasks page is "mine". */
+.partner-card { margin-top: 14px; padding: 14px; border-radius: 21px; background: linear-gradient(150deg,#eefaf5,#f3f8ff); box-shadow: 0 8px 22px rgba(52,120,102,.06); }
+.partner-head { display: flex; align-items: center; gap: 10px; }
+.partner-avatar { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 13px; display: grid; place-items: center; color: #328f77; background: rgba(255,255,255,.8); font-size: 14px; font-weight: 800; }
+.partner-head > div { min-width: 0; flex: 1; }
+.partner-head strong { display: block; font-size: 13px; }
+.partner-head small { display: block; margin-top: 2px; color: #86a89c; font-size: 11px; }
+.partner-today { width: 28px; height: 28px; flex: 0 0 28px; border-radius: 50%; display: grid; place-items: center; color: #9fb3ab; background: rgba(255,255,255,.72); }
+.partner-today.is-on { color: #c9932c; background: #fff3d4; }
+.partner-today svg { width: 14px; height: 14px; }
+.partner-progress { height: 7px; margin-top: 12px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.8); }
+.partner-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#7fc9ae,#3f9e81); transition: width .35s ease; }
+.partner-foot { margin-top: 9px; display: flex; align-items: center; justify-content: space-between; color: #6f9b8b; font-size: 11px; }
+.partner-foot span { display: inline-flex; align-items: center; gap: 4px; }
+.partner-foot svg { width: 12px; height: 12px; }
+
+/* Gives the three inert counters above it somewhere to have arrived at. */
+.milestone-card { margin-top: 14px; padding: 15px; border-radius: 22px; background: linear-gradient(150deg,#fff5e4,#fdeef4); box-shadow: 0 8px 22px rgba(160,116,60,.07); }
+.milestone-reached { display: flex; align-items: flex-start; gap: 10px; }
+.milestone-badge { width: 36px; height: 36px; flex: 0 0 36px; border-radius: 12px; display: grid; place-items: center; color: #c9932c; background: rgba(255,255,255,.78); }
+.milestone-badge svg { width: 17px; height: 17px; }
+.milestone-reached > div { min-width: 0; flex: 1; }
+.milestone-reached strong { display: block; font-size: 14px; }
+.milestone-reached p { margin: 4px 0 0; color: #9b8264; font-size: 12px; line-height: 1.7; }
+.milestone-next { margin: 11px 0 0; padding-top: 10px; border-top: 1px solid rgba(190,150,100,.14); color: #a8845c; font-size: 11px; }
+
 .daily-prompt { margin-top: 20px; padding: 15px; border-radius: 21px; background: linear-gradient(150deg,#fff6ef,#fdf0f6); }
 .daily-prompt-tag { display: inline-flex; align-items: center; gap: 5px; color: #c07a53; font-size: 11px; font-weight: 700; }
 .daily-prompt-tag svg { width: 13px; height: 13px; }

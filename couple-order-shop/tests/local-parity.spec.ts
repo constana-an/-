@@ -140,6 +140,51 @@ test("a finished wish lands on the memory timeline by itself", async ({ page }) 
   await expect(entry.getByText("二宝 完成了 大宝 点的")).toBeVisible();
 });
 
+test("the partner card shows the other person's week, and never their wallet", async ({ page }) => {
+  await enterAs(page, "大宝", {
+    "couple-shop-coins:二宝": "137",
+    "couple-shop-checkins:二宝": JSON.stringify([shopDay(), shopDay(-1), shopDay(-2)]),
+    // +1 morning, +3 focus, +10 date-task = 14 this week.
+    "couple-shop-task-claims:二宝": JSON.stringify([`${shopDay()}:morning`, `${shopDay()}:focus`, `${shopDay()}:date-task`]),
+  });
+  await page.getByRole("button", { name: "任务", exact: true }).click();
+
+  const card = page.locator(".partner-card");
+  await expect(card).toBeVisible();
+  await expect(card.getByText("二宝这周")).toBeVisible();
+  await expect(card.getByText(/今天已经来过小铺了 · 连续 3 天/)).toBeVisible();
+  await expect(card.getByText("本周攒了 14 甜心币")).toBeVisible();
+  // 二宝's balance is 137; wallets are private and must not surface here.
+  await expect(card.getByText("137")).toHaveCount(0);
+
+  // Switching sides flips the card to the other person, with nothing carried over.
+  await switchIdentity(page, "二宝");
+  await page.getByRole("button", { name: "任务", exact: true }).click();
+  await expect(page.locator(".partner-card").getByText("大宝这周")).toBeVisible();
+  await expect(page.locator(".partner-card").getByText("今天还没来签到")).toBeVisible();
+  await expect(page.locator(".partner-card").getByText("本周攒了 0 甜心币")).toBeVisible();
+});
+
+test("a milestone is celebrated once, not on every reload", async ({ page }) => {
+  // 100 days in, with the shop's own start date doing the work.
+  await enterAs(page, "大宝", {
+    "couple-shop-profile": JSON.stringify({
+      shopName: "我们的小铺", firstName: "大宝", secondName: "二宝", startedOn: shopDay(-100),
+    }),
+  });
+  await expect(page.getByText("🎉 相爱 100 天")).toBeVisible();
+
+  await page.getByRole("button", { name: "回忆", exact: true }).click();
+  const card = page.locator(".milestone-card");
+  await expect(card.getByText("相爱 100 天")).toBeVisible();
+  await expect(card.getByText(/再 \d+ 个心愿，就是「第 1?0? ?个心愿」|再 \d+ /)).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText("🎉 相爱 100 天")).toHaveCount(0);
+  await page.getByRole("button", { name: "回忆", exact: true }).click();
+  await expect(page.locator(".milestone-card").getByText("相爱 100 天")).toBeVisible();
+});
+
 test("the album explains itself instead of dead-ending", async ({ page }) => {
   await enterAs(page, "大宝");
   await page.getByRole("button", { name: "回忆", exact: true }).click();

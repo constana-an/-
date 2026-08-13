@@ -1,5 +1,6 @@
 import { CalendarIcon, CameraIcon, HeartFilledIcon, ImageIcon, LockClosedIcon, Pencil1Icon, PlusIcon, StarFilledIcon, SunIcon } from "@radix-ui/react-icons";
 import { dayKeyOf, daysUntilAnniversary, formatStartedOn, isPastOneOff, monthKeyOf, relationshipDays, thisMonthKey } from "../lib/date";
+import { milestoneUnit, nextMilestone, reachedMilestones } from "../lib/catalog";
 import { cloudEnabled } from "../lib/supabase";
 import { MenuArt } from "./MenuArt";
 import type { Anniversary, CheckinStatus, CoupleProfile, MemoryEntry, Order } from "../lib/types";
@@ -58,6 +59,12 @@ export function MemoriesScreen({
   const sortedAnniversaries = [...anniversaries].sort((a, b) => countdownOrder(a) - countdownOrder(b));
   const nextAnniversary = sortedAnniversaries[0];
   const startedLabel = formatStartedOn(profile.startedOn).replace(/ 年 | 月 | 日/g, ".").replace(/\.$/, "");
+  // The counters in stats-row have always been inert. These give them a place
+  // to have arrived at, and a place to be heading.
+  const counts = { days, wishes: done.length, streak: checkin.streak };
+  const reached = reachedMilestones(counts);
+  const latest = reached[reached.length - 1] ?? null;
+  const upcoming = nextMilestone(counts);
   // Finished wishes are the couple's own history and need no curation: newest
   // first, straight from the order list. The album on top is for the photos
   // they choose to add on purpose.
@@ -67,6 +74,26 @@ export function MemoriesScreen({
     <section className="page-section memory-page">
       <div className="memory-hero"><span>{monthLabel}的小小幸福</span><strong>{doneThisMonth.length}</strong><p>件这个月一起完成的心愿</p><div className="avatar-pair"><span>{profile.firstName.slice(0, 1)}</span><span>{profile.secondName.slice(0, 1)}</span></div></div>
       <div className="stats-row"><div><HeartFilledIcon /><strong>{days}</strong><span>相爱天数</span></div><div><StarFilledIcon /><strong>{done.length}</strong><span>累计完成</span></div><div><CalendarIcon /><strong>{startedLabel}</strong><span>开始日期</span></div></div>
+      {(latest || upcoming) && (
+        <section className="milestone-card" aria-label="里程碑">
+          {latest ? (
+            <div className="milestone-reached">
+              <span className="milestone-badge"><StarFilledIcon /></span>
+              <div><strong>{latest.title}</strong><p>{latest.body}</p></div>
+            </div>
+          ) : (
+            <div className="milestone-reached">
+              <span className="milestone-badge"><StarFilledIcon /></span>
+              <div><strong>还没有里程碑</strong><p>完成第一个心愿，这里就会记下第一笔。</p></div>
+            </div>
+          )}
+          {upcoming && (
+            <p className="milestone-next">
+              再 {upcoming.remaining} {milestoneUnit[upcoming.milestone.kind]}，就是「{upcoming.milestone.title}」
+            </p>
+          )}
+        </section>
+      )}
       <div className="checkin-card">
         <span className="checkin-flame"><SunIcon /></span>
         <div><small>连续签到</small><strong>{checkin.streak} 天</strong><p>每天回来看看，给自己的钱包 +1 甜心币</p></div>

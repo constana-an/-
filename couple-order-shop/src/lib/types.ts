@@ -97,6 +97,29 @@ export type CheckinStatus = {
   checkedToday: boolean;
 };
 
+/**
+ * What the other person has been up to. Deliberately does not carry a balance:
+ * wallets are private, and this is the one view across the couple boundary.
+ */
+export type PartnerStatus = {
+  displayName: string;
+  streak: number;
+  /** Task rewards earned this week — the same figure each person sees about themselves. */
+  earnedThisWeek: number;
+  checkedToday: boolean;
+};
+
+/** The counters a milestone can watch. All three already exist on screen. */
+export type MilestoneKind = "days" | "wishes" | "streak";
+
+export type Milestone = {
+  id: string;
+  kind: MilestoneKind;
+  threshold: number;
+  title: string;
+  body: string;
+};
+
 export type MembershipState = {
   planName: string;
   status: string;

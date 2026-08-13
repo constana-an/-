@@ -1,6 +1,6 @@
 import { ActivityLogIcon, BookmarkIcon, CameraIcon, ChatBubbleIcon, CheckCircledIcon, HeartIcon, HomeIcon, RocketIcon, StarFilledIcon, SunIcon, TimerIcon } from "@radix-ui/react-icons";
 import { dayKeyOf, todayKey, weekKey } from "./date.ts";
-import type { Category, CoupleTask, MemoryEntry, MenuItem, Order, OrderStatus, TaskFrequency, TaskRequirement } from "./types.ts";
+import type { Category, CoupleTask, MemoryEntry, MenuItem, Milestone, MilestoneKind, Order, OrderStatus, TaskFrequency, TaskRequirement } from "./types.ts";
 
 export const MENU: MenuItem[] = [
   { id: "fruit-tea", category: "food", name: "缤纷水果茶", description: "满杯鲜果，酸甜刚刚好", price: 28, image: "/assets/menu/fruit-tea.png", tint: "#fff0e5" },
@@ -105,6 +105,19 @@ export function taskRequirementMet(
     && withinPeriod(order.completedAt ?? order.createdAt));
 }
 
+/**
+ * Coins one person earned from tasks this week, from their claim keys alone.
+ * Shared by the tasks screen and the local-mode partner card so both sides of
+ * "我 42 / 对方 30" are counted the same way.
+ */
+export function earnedInWeek(claims: readonly string[], monday: string = weekKey(), today: string = todayKey()): number {
+  return claims.reduce((sum, key) => {
+    const [period, id] = key.split(":");
+    if (period < monday || period > today) return sum;
+    return sum + (TASKS.find((task) => task.id === id)?.reward ?? 0);
+  }, 0);
+}
+
 /** What one person can earn in a perfect week: 7 daily rounds plus the weekly set. */
 export const WEEKLY_PERSONAL_GOAL = TASKS.reduce(
   (sum, task) => sum + task.reward * (task.frequency === "daily" ? 7 : 1),
@@ -154,6 +167,55 @@ export const WISH_TEMPLATES: Array<{ name: string; description: string; price: n
   { name: "带一份宵夜回来", description: "什么都行，是你挑的就好", price: 32, category: "food" },
   { name: "一起看一集剧", description: "不看手机，看完聊两句", price: 28, category: "date" },
 ];
+
+/**
+ * 相爱天数、累计完成、连续签到 have all been on screen from the beginning, and
+ * nothing has ever happened when one of them reached a number worth noticing.
+ * These give the counters somewhere to arrive.
+ *
+ * Every line is written for its own moment — a template would produce "恭喜达成
+ * 相爱 100 天", which is exactly the tone this app is trying not to have.
+ */
+export const MILESTONES: Milestone[] = [
+  { id: "days-100", kind: "days", threshold: 100, title: "相爱 100 天", body: "三位数了。前 99 天里，有几天是真的很难过的，你们还是走到了这里。" },
+  { id: "days-365", kind: "days", threshold: 365, title: "相爱一整年", body: "一年四季都陪对方过了一遍。明年的这一天，记得回来看看今天写了什么。" },
+  { id: "days-520", kind: "days", threshold: 520, title: "相爱 520 天", body: "这个数字是自己撞上来的，不庆祝一下说不过去。" },
+  { id: "days-1000", kind: "days", threshold: 1000, title: "相爱 1000 天", body: "一千天。这已经不是运气了，是两个人每天都选择了对方。" },
+  { id: "wishes-1", kind: "wishes", threshold: 1, title: "第一个心愿完成了", body: "小铺正式开张。第一份认真回应，值得被记住。" },
+  { id: "wishes-10", kind: "wishes", threshold: 10, title: "第 10 个心愿", body: "十次说到做到。这间小铺开始有信用了。" },
+  { id: "wishes-50", kind: "wishes", threshold: 50, title: "第 50 个心愿", body: "五十份被认真对待的期待。翻翻时间线，那里面有很多个普通的好日子。" },
+  { id: "wishes-100", kind: "wishes", threshold: 100, title: "第 100 个心愿", body: "一百次。这间小铺已经是你们相处方式的一部分了。" },
+  { id: "streak-7", kind: "streak", threshold: 7, title: "连续签到一周", body: "七天都记得回来看看对方，比听起来难。" },
+  { id: "streak-30", kind: "streak", threshold: 30, title: "连续签到 30 天", body: "一整个月没断过。这已经是习惯，不是坚持了。" },
+  { id: "streak-100", kind: "streak", threshold: 100, title: "连续签到 100 天", body: "一百天不断，说明你每天都想起了这件事，也想起了对方。" },
+];
+
+export type MilestoneCounts = { days: number; wishes: number; streak: number };
+
+/** Everything the couple has already passed, in the order the list defines. */
+export function reachedMilestones(counts: MilestoneCounts): Milestone[] {
+  return MILESTONES.filter((milestone) => counts[milestone.kind] >= milestone.threshold);
+}
+
+/**
+ * The nearest thing still ahead, measured by how far away it is rather than by
+ * list order — otherwise a distant 相爱 1000 天 would hide 第 10 个心愿.
+ */
+export function nextMilestone(counts: MilestoneCounts): { milestone: Milestone; remaining: number } | null {
+  let best: { milestone: Milestone; remaining: number } | null = null;
+  for (const milestone of MILESTONES) {
+    const remaining = milestone.threshold - counts[milestone.kind];
+    if (remaining > 0 && (!best || remaining < best.remaining)) best = { milestone, remaining };
+  }
+  return best;
+}
+
+/** How the shortfall reads for each counter. */
+export const milestoneUnit: Record<MilestoneKind, string> = {
+  days: "天",
+  wishes: "个心愿",
+  streak: "天签到",
+};
 
 export const categoryMeta: Array<{ id: Category; label: string; subtitle: string; icon: typeof HomeIcon }> = [
   { id: "food", label: "点吃的", subtitle: "想吃就许愿", icon: HomeIcon },

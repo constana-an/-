@@ -17,6 +17,7 @@ export const STORAGE_KEYS = {
   checkins: "couple-shop-checkins",
   anniversaries: "couple-shop-anniversaries",
   reminded: "couple-shop-reminded",
+  milestones: "couple-shop-milestones",
   openingDismissed: "couple-shop-opening-dismissed",
 } as const;
 
@@ -124,6 +125,24 @@ export function loadCheckinDays(identity: Identity | null): string[] {
     const days = saved.filter((value): value is string =>
       typeof value === "string" && isValidDateKey(value) && value <= today);
     return [...new Set(days)].sort().reverse().slice(0, CHECKIN_HISTORY_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Which milestones this person has already been congratulated for. Per identity
+ * like the wallet: switching to the other person on a shared device must not
+ * swallow a celebration they have not seen yet.
+ */
+export const milestonesKey = (identity: Identity) => `${STORAGE_KEYS.milestones}:${identity}`;
+
+export function loadCelebratedMilestones(identity: Identity | null): string[] {
+  if (!identity) return [];
+  try {
+    const saved = JSON.parse(localStorage.getItem(milestonesKey(identity)) ?? "[]") as unknown;
+    if (!Array.isArray(saved)) return [];
+    return [...new Set(saved.filter((value): value is string => typeof value === "string"))];
   } catch {
     return [];
   }

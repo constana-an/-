@@ -21,10 +21,10 @@ import {
   TrashIcon,
 } from "@radix-ui/react-icons";
 import { BottomSheet, KeyboardInput, MobileScroll, useKeyboard } from "./mobile";
-import { DESIRED_TIMES, MENU, WISH_TEMPLATES, categoryMeta, statusText, taskClaimKey } from "./lib/catalog";
-import { dayKeyOf, formatStartedOn, isValidDateKey, normalizeDateInput, todayKey } from "./lib/date";
+import { DESIRED_TIMES, MENU, WISH_TEMPLATES, categoryMeta, earnedInWeek, reachedMilestones, statusText, taskClaimKey } from "./lib/catalog";
+import { dayKeyOf, formatStartedOn, isValidDateKey, normalizeDateInput, relationshipDays, todayKey } from "./lib/date";
 import { checkinStatusFrom, checkinStreak, dueAnniversaries } from "./lib/date";
-import { authErrorMessage, orderErrorMessage, orderStatusErrorMessage, rewardErrorMessage } from "./lib/errors";
+import { authErrorMessage, orderErrorMessage, orderStatusErrorMessage, rewardErrorMessage, wishErrorMessage } from "./lib/errors";
 import { appleAuthEnabled, cloudEnabled, getSupabase, phoneAuthEnabled, type SupabaseClient } from "./lib/supabase";
 import {
   CHECKIN_REWARD,
@@ -32,6 +32,7 @@ import {
   STORAGE_KEYS,
   checkinsKey,
   claimsKey,
+  loadCelebratedMilestones,
   loadCheckinDays,
   loadCoupleProfile,
   loadEconomyCoins,
@@ -42,6 +43,7 @@ import {
   loadTaskClaims,
   pruneReminders,
   remindedKey,
+  milestonesKey,
   walletKey,
 } from "./lib/storage";
 import { CUSTOM_CATEGORIES, CUSTOM_PRICE_RANGE, IDENTITIES, displayNameFor, partnerFor } from "./lib/types";
@@ -59,6 +61,7 @@ import type {
   MenuItem,
   Order,
   OrderStatus,
+  PartnerStatus,
 } from "./lib/types";
 import { MemoriesScreen } from "./screens/MemoriesScreen";
 import { MenuArt } from "./screens/MenuArt";
@@ -237,6 +240,8 @@ export default function Prototype() {
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
   const [anniversaries, setAnniversaries] = useState<Anniversary[]>(loadLocalAnniversaries);
   const [checkin, setCheckin] = useState<CheckinStatus>({ streak: 0, checkedToday: false });
+  const [partner, setPartner] = useState<PartnerStatus | null>(null);
+  const [partnerRefresh, setPartnerRefresh] = useState(0);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [memoryCaption, setMemoryCaption] = useState("");
   const [memoryDate, setMemoryDate] = useState(todayKey());
@@ -412,6 +417,48 @@ export default function Prototype() {
     setOnboardingOpen(true);
   }, [identity]);
 
+  /**
+   * Local mode keeps both identities on one device, so the partner's week is
+   * simply their own storage keys — no server needed, and the card behaves
+   * exactly as it does in the cloud. `wallet` is in the dependencies because
+   * every local earn writes through it, which is the cue to recount.
+   */
+  useEffect(() => {
+    if (cloudCoupleId) return;
+    if (!partnerIdentity || !partnerName) return setPartner(null);
+    const days = loadCheckinDays(partnerIdentity);
+    setPartner({
+      displayName: partnerName,
+      streak: checkinStreak(days),
+      earnedThisWeek: earnedInWeek(loadTaskClaims(partnerIdentity)),
+      checkedToday: days.includes(todayKey()),
+    });
+  }, [cloudCoupleId, partnerIdentity, partnerName, wallet, partnerRefresh]);
+
+  /**
+   * Celebrate a milestone the first time this person crosses it, then remember
+   * it so a reload is not another party. Kept per identity like the wallet:
+   * on a shared device, 二宝 should still get their own moment.
+   *
+   * Nothing here grants coins — it is a congratulation, so localStorage is the
+   * honest place for it even in cloud mode.
+   */
+  useEffect(() => {
+    if (!identity) return;
+    const counts = {
+      days: relationshipDays(profile.startedOn),
+      wishes: orders.filter((order) => order.status === "done").length,
+      streak: cloudCoupleId ? checkin.streak : checkinStatusFrom(wallet.checkins).streak,
+    };
+    const celebrated = loadCelebratedMilestones(identity);
+    const fresh = reachedMilestones(counts).filter((milestone) => !celebrated.includes(milestone.id));
+    if (fresh.length === 0) return;
+    // Several can land at once on a first run; the newest is the one to show.
+    const newest = fresh[fresh.length - 1];
+    localStorage.setItem(milestonesKey(identity), JSON.stringify([...celebrated, ...fresh.map((item) => item.id)]));
+    showToast(`🎉 ${newest.title}`);
+  }, [identity, profile.startedOn, orders, checkin.streak, wallet.checkins, cloudCoupleId, showToast]);
+
   useEffect(() => {
     const { view: deepView, orderId } = readDeepLink();
     if (!deepView && !orderId) return;
@@ -531,6 +578,7 @@ export default function Prototype() {
         // Anniversaries belong to the couple, so both identities take them.
         if (event.data.anniversaries) setAnniversaries(event.data.anniversaries);
         // A wallet only ever accepts an update addressed to its own owner.
+        if (event.data.walletOwner && event.data.walletOwner !== identity) setPartnerRefresh((count) => count + 1);
         if (event.data.walletOwner && event.data.walletOwner === identity) {
           setWallet((current) => (current.owner === identity
             ? {
@@ -646,6 +694,23 @@ export default function Prototype() {
     if (typeof data?.coin_balance === "number") setCoins(data.coin_balance);
   }, [setCoins]);
 
+  /**
+   * The one view across the couple boundary. It is a function call rather than a
+   * `profiles` select on purpose: that table's policy only exposes your own row
+   * because the wallet lives there, and this returns no balance.
+   */
+  const loadPartnerStatus = useCallback(async (client: SupabaseClient) => {
+    const { data } = await client.rpc("get_partner_status").maybeSingle();
+    if (!data) return setPartner(null);
+    const row = data as { display_name: string; streak: number; earned_this_week: number; checked_today: boolean };
+    setPartner({
+      displayName: row.display_name,
+      streak: row.streak,
+      earnedThisWeek: row.earned_this_week,
+      checkedToday: row.checked_today,
+    });
+  }, []);
+
   const loadCouple = useCallback(async (client: SupabaseClient, coupleId: string) => {
     const { data } = await client
       .from("couples")
@@ -701,6 +766,7 @@ export default function Prototype() {
         loadMemories(client, coupleId),
         loadAnniversaries(client, coupleId),
         loadCustomWishes(client, coupleId),
+        loadPartnerStatus(client),
       ]);
       if (!active) return;
       // Task claims are per person: each partner earns their own rewards.
@@ -746,12 +812,19 @@ export default function Prototype() {
       .on("postgres_changes", { event: "*", schema: "public", table: "custom_menu_items", filter: `couple_id=eq.${coupleId}` }, () => {
         void loadCustomWishes(client, coupleId);
       })
+      // Either table moving means the other person did something worth showing.
+      .on("postgres_changes", { event: "*", schema: "public", table: "task_claims", filter: `couple_id=eq.${coupleId}` }, () => {
+        void loadPartnerStatus(client);
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "daily_checkins", filter: `couple_id=eq.${coupleId}` }, () => {
+        void loadPartnerStatus(client);
+      })
       .subscribe();
     return () => {
       active = false;
       client.removeChannel(channel);
     };
-  }, [supabase, cloudCoupleId, authUser, loadOrders, loadCouple, loadMyBalance, loadMemories, loadAnniversaries, loadCustomWishes, setClaimedTasks]);
+  }, [supabase, cloudCoupleId, authUser, loadOrders, loadCouple, loadMyBalance, loadMemories, loadAnniversaries, loadCustomWishes, loadPartnerStatus, setClaimedTasks]);
 
   // Signed photo links expire after an hour; refresh them when the album is
   // opened again or the app returns to the foreground.
@@ -1181,7 +1254,7 @@ export default function Prototype() {
         ? await client.from("custom_menu_items").update(fields).eq("id", editingWishId)
         : await client.from("custom_menu_items").insert({ id: entry.id, couple_id: cloudCoupleId, created_by: authUser.id, ...fields });
       setCloudBusy(false);
-      if (error) return showToast("保存失败，请稍后再试");
+      if (error) return showToast(wishErrorMessage(error.message));
     }
     setCustomItems((current) => (editingWishId
       ? current.map((item) => (item.id === entry.id ? entry : item))
@@ -1603,6 +1676,7 @@ export default function Prototype() {
               currentName={currentName}
               currentUserId={authUser?.id}
               memoriesTracked={Boolean(cloudCoupleId)}
+              partner={partner}
             />
           )}
           {view === "orders" && (

@@ -126,6 +126,28 @@ test("a couple's own wishes are shared, and priced by the server", () => {
   assert.doesNotMatch(rpc.slice(0, rpc.indexOf("$$;")), /coin_balance - p_price/i);
 });
 
+test("the partner window never widens into a wallet", () => {
+  const sql = sqlInApplyOrder();
+  const rpc = sql.slice(sql.lastIndexOf("create or replace function public.get_partner_status"));
+  const body = rpc.slice(0, rpc.indexOf("$$;"));
+  // The whole reason this function exists is that `profiles` may not be opened
+  // up: the balance lives on the row a wider select policy would expose.
+  assert.doesNotMatch(body, /coin_balance/i, "get_partner_status must never return a balance");
+  assert.match(body, /security definer/i);
+  // And the policy it exists to avoid relaxing must still be select-only and
+  // scoped to the caller's own row.
+  assert.deepEqual(commandsOn("profiles"), ["select"]);
+  assert.match(lastPolicyStatement("profiles", "select"), /user_id = auth\.uid\(\)/i);
+});
+
+test("a couple cannot bury their own shop under self-written wishes", () => {
+  const sql = sqlInApplyOrder();
+  // Row-level CHECKs guard every field of a wish; only a trigger can guard the
+  // number of them.
+  assert.match(sql, /create trigger custom_wish_cap[\s\S]*?before insert on public\.custom_menu_items/i);
+  assert.match(sql, /custom wish limit reached/i);
+});
+
 test("memory entries are editable and deletable only by their uploader", () => {
   assert.deepEqual([...finalPolicies().get("memory_entries").values()].sort(), ["delete", "insert", "select", "update"]);
   assert.match(lastPolicyStatement("memory_entries", "update"), /using \(\s*created_by = auth\.uid\(\)/i);

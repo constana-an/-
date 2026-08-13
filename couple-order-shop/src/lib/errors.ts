@@ -40,3 +40,11 @@ export function rewardErrorMessage(message: string, duplicateCopy: string): stri
   if (lower.includes("not paired")) return "还没有连接双人小铺";
   return "操作失败，请稍后再试";
 }
+
+/** Maps the exceptions raised when saving a couple's own wish. */
+export function wishErrorMessage(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("custom wish limit reached")) return "自己写的心愿最多 30 个，先下架一个再加";
+  if (lower.includes("check constraint") || lower.includes("violates check")) return "名字、描述或价格超出了允许的范围";
+  return "保存失败，请稍后再试";
+}
