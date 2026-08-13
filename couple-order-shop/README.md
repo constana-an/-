@@ -52,6 +52,7 @@ npm run dev
 | `20260812080000_cancel_order.sql` | 撤回订单、婉拒理由；`update_order_status` 换三参数版（**旧两参数版会被 drop**，否则调用歧义） | 撤回按钮报错 |
 | `20260812100000_pairing_bonus.sql` | 配对完成时双方各 20 币（8 + 20 = 28，当天就能点第一份） | 新情侣要攒三四天才能下第一单 |
 | `20260812120000_partner_presence.sql` | `get_partner_status()` 只读窗口（不含余额）、自写心愿上限 30、把 `custom_menu_items`／`task_claims`／`daily_checkins` 加进 realtime publication | 看不到对方状态；自写心愿无上限；**对方新写的心愿要刷新才出现**（订阅一直没生效） |
+| `20260813000000_read_grants.sql` | **补上 `profiles`／`orders`／`couples`／`task_claims` 从未有过的 select 授权**；给 service_role 显式授权 | **整个 app 打不开**：登录后每个页面都 permission denied，连自己的余额都读不到 |
 
 > 订单表在 `20260811120000` 就已经收口：直接写 `orders` 的策略被删除，`insert/update/delete` 授权也已从 `anon`、`authenticated` 收回，所有下单与状态流转只能走 `place_couple_order` / `update_order_status` 两个 SECURITY DEFINER 函数。
 

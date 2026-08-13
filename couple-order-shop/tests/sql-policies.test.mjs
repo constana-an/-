@@ -126,6 +126,26 @@ test("a couple's own wishes are shared, and priced by the server", () => {
   assert.doesNotMatch(rpc.slice(0, rpc.indexOf("$$;")), /coin_balance - p_price/i);
 });
 
+test("every table the client reads is granted select", () => {
+  // Postgres checks the table grant before RLS, so a read policy without a
+  // matching grant is dead code. profiles, orders, couples and task_claims had
+  // policies and no grant for months: applying the schema to an empty database
+  // produced a shop where every screen failed with "permission denied", and
+  // nothing here noticed because this file only ever checked write paths.
+  // Comments first: these migrations explain themselves at length, and prose
+  // about granting reads matches the same pattern as an actual grant.
+  const sql = sqlInApplyOrder().replace(/--[^\n]*/g, "");
+  const granted = new Set();
+  for (const [, columns] of sql.matchAll(/grant\s+([^;]*?)\s+to\s+[^;]*authenticated[^;]*;/gis)) {
+    if (!/\bselect\b/i.test(columns.split(/\bon\b/i)[0])) continue;
+    for (const [, table] of columns.matchAll(/public\.(\w+)/g)) granted.add(table);
+  }
+  // `grant all ... to service_role` does not help the signed-in user.
+  for (const table of ["profiles", "orders", "couples", "task_claims", "menu_catalog", "memory_entries", "anniversaries", "custom_menu_items", "push_subscriptions", "daily_checkins"]) {
+    assert.ok(granted.has(table), `${table} is read by the client but never granted select to authenticated`);
+  }
+});
+
 test("the partner window never widens into a wallet", () => {
   const sql = sqlInApplyOrder();
   const rpc = sql.slice(sql.lastIndexOf("create or replace function public.get_partner_status"));

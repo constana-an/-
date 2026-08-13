@@ -173,12 +173,16 @@ describe("cloud integration", { skip }, () => {
 
   it("debits the sender's own wallet when an order is placed", async () => {
     const before = await balanceOf(session.a);
+    // Measured, not assumed: the opening balance, the pairing bonus and any
+    // task an earlier case claimed all move this number, and hard-coding it
+    // makes the test fail for reasons that have nothing to do with paying.
+    const partnerBefore = await balanceOf(session.b);
     const { id, error } = await placeOrder(session.a, { from: "大宝", to: "二宝" });
     assert.equal(error, null, `place_couple_order failed: ${error?.message}`);
     orderId = id;
     assert.equal(await balanceOf(session.a), before - 28);
     // The recipient never pays for a wish they were given.
-    assert.equal(await balanceOf(session.b), 8);
+    assert.equal(await balanceOf(session.b), partnerBefore);
   });
 
   it("shows the order to the partner and to nobody else", async () => {
