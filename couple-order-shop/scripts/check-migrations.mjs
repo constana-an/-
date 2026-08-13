@@ -41,6 +41,15 @@ const RULES = [
     describe: ([, column]) => `add column ${column} needs "if not exists", or an information_schema guard`,
   },
   {
+    // A hosted project adds new tables to `supabase_realtime` by itself, so an
+    // unguarded add raises "already member of publication" and leaves the
+    // migration half-applied. The local stack does not, which is exactly how
+    // this survived in the very first migration until it met a real project.
+    match: /alter publication (\w+) add table ([\w.]+)/gi,
+    check: (sql, [, , table]) => new RegExp(`tablename = '${table.split(".").pop()}'`, "i").test(sql),
+    describe: ([, , table]) => `alter publication ... add table ${table} needs a pg_publication_tables guard`,
+  },
+  {
     match: /create index (?!if not exists|concurrently if not exists)(\w+)/gi,
     check: () => false,
     describe: ([, index]) => `create index ${index} needs "if not exists"`,

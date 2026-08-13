@@ -270,8 +270,26 @@ $$;
 
 grant execute on function public.place_couple_order(uuid, text, text, text, integer, text, text, text, text) to authenticated;
 
-alter publication supabase_realtime add table public.orders;
-alter publication supabase_realtime add table public.couples;
+-- A hosted Supabase project takes new tables into `supabase_realtime` on its
+-- own, so an unguarded add fails with "already member of publication" and stops
+-- the very first migration halfway through. The local stack does not do this,
+-- which is why it only ever showed up against the real project.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'orders'
+  ) then
+    alter publication supabase_realtime add table public.orders;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'couples'
+  ) then
+    alter publication supabase_realtime add table public.couples;
+  end if;
+end
+$$;
 
 -- Run the migrations in order after this file:
 --   migrations/20260811013000_place_couple_order.sql
