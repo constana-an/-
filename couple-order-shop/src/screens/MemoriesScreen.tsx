@@ -1,11 +1,15 @@
+import { useState } from "react";
 import { CalendarIcon, CameraIcon, HeartFilledIcon, ImageIcon, LockClosedIcon, Pencil1Icon, PlusIcon, StarFilledIcon, SunIcon } from "@radix-ui/react-icons";
-import { dayKeyOf, daysUntilAnniversary, formatStartedOn, isPastOneOff, monthKeyOf, relationshipDays, thisMonthKey } from "../lib/date";
+import { dayKeyOf, daysUntilAnniversary, formatMonthKey, formatStartedOn, isPastOneOff, monthKeyOf, relationshipDays, thisMonthKey } from "../lib/date";
 import { milestoneUnit, nextMilestone, reachedMilestones } from "../lib/catalog";
 import { cloudEnabled } from "../lib/supabase";
 import { MenuArt } from "./MenuArt";
 import type { Anniversary, CheckinStatus, CoupleProfile, MemoryEntry, Order } from "../lib/types";
 
 const isPast = (item: Anniversary) => isPastOneOff(item.eventDate, item.repeatsYearly);
+
+/** How many finished wishes to show before asking, and per tap after that. */
+const TIMELINE_PAGE = 20;
 
 const anniversaryHint = (item: Anniversary): string => {
   if (isPast(item)) return "已经过去";
@@ -48,6 +52,7 @@ export function MemoriesScreen({
   onPlanDate: () => void;
   onWriteWish: () => void;
 }) {
+  const [timelineLimit, setTimelineLimit] = useState(TIMELINE_PAGE);
   const done = orders.filter((order) => order.status === "done");
   // The hero counts this calendar month; the all-time total gets its own tile so
   // the two numbers can never be mistaken for each other.
@@ -68,8 +73,22 @@ export function MemoriesScreen({
   // Finished wishes are the couple's own history and need no curation: newest
   // first, straight from the order list. The album on top is for the photos
   // they choose to add on purpose.
-  const timeline = [...done].sort((a, b) =>
-    (b.completedAt ?? b.createdAt).localeCompare(a.completedAt ?? a.createdAt)).slice(0, 20);
+  //
+  // Nothing is dropped. This used to keep the newest 20 and silently discard
+  // the rest, which quietly deletes the early months of a relationship from a
+  // section calling itself 我们的时间线. Older entries are behind a button
+  // instead.
+  const ordered = [...done].sort((a, b) =>
+    (b.completedAt ?? b.createdAt).localeCompare(a.completedAt ?? a.createdAt));
+  const visible = ordered.slice(0, timelineLimit);
+  const remaining = ordered.length - visible.length;
+  const months: Array<{ key: string; orders: Order[] }> = [];
+  for (const order of visible) {
+    const key = monthKeyOf(order.completedAt ?? order.createdAt) ?? thisMonthKey();
+    const last = months[months.length - 1];
+    if (last?.key === key) last.orders.push(order);
+    else months.push({ key, orders: [order] });
+  }
   return (
     <section className="page-section memory-page">
       <div className="memory-hero"><span>{monthLabel}的小小幸福</span><strong>{doneThisMonth.length}</strong><p>件这个月一起完成的心愿</p><div className="avatar-pair"><span>{profile.firstName.slice(0, 1)}</span><span>{profile.secondName.slice(0, 1)}</span></div></div>
@@ -171,19 +190,31 @@ export function MemoriesScreen({
         <button className="memory-empty" onClick={onAddAnniversary}><CalendarIcon /><strong>添加第一个纪念日</strong><span>生日、第一次见面、领证日都可以</span></button>
       )}
       <div className="memory-section-heading"><div><small>完成的心愿自动留在这里</small><h3>我们的时间线</h3></div></div>
-      {timeline.length > 0 ? (
-        <ol className="memory-timeline">
-          {timeline.map((order) => (
-            <li key={order.id}>
-              <span className="timeline-art"><MenuArt item={order} /></span>
-              <div>
-                <small>{dayKeyOf(order.completedAt ?? order.createdAt) ?? ""} · {order.to} 完成了 {order.from} 点的</small>
-                <strong>{order.itemName}</strong>
-                {order.note && <p>“{order.note}”</p>}
-              </div>
-            </li>
+      {ordered.length > 0 ? (
+        <>
+          {months.map((month) => (
+            <section key={month.key} className="timeline-month">
+              <h4>{formatMonthKey(month.key)}<span>{month.orders.length}</span></h4>
+              <ol className="memory-timeline">
+                {month.orders.map((order) => (
+                  <li key={order.id}>
+                    <span className="timeline-art"><MenuArt item={order} /></span>
+                    <div>
+                      <small>{dayKeyOf(order.completedAt ?? order.createdAt) ?? ""} · {order.to} 完成了 {order.from} 点的</small>
+                      <strong>{order.itemName}</strong>
+                      {order.note && <p>“{order.note}”</p>}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
           ))}
-        </ol>
+          {remaining > 0 && (
+            <button className="timeline-more" onClick={() => setTimelineLimit((current) => current + TIMELINE_PAGE)}>
+              还有 {remaining} 件，继续往前看
+            </button>
+          )}
+        </>
       ) : (
         <div className="memory-card"><div><span className="memory-dot" /><p>还没有开始</p></div><h3>一份认真回应，就是最好的偏爱。</h3><p>完成一个心愿，它就会自己出现在这条时间线上。</p></div>
       )}

@@ -50,6 +50,80 @@ test("the simulated keyboard leaves the screen on every page", async ({ page }) 
   }
 });
 
+/**
+ * The runtime only lowers the keyboard when something asks it to. A field that
+ * lives on a page rather than in a sheet had nothing doing the asking, so the
+ * keyboard stayed up over the bottom navigation until an explicit button was
+ * pressed — and the navigation was behind the keyboard.
+ */
+test("tapping away from a text field puts the keyboard away", async ({ page }) => {
+  await enter(page);
+  await page.getByRole("button", { name: "我们", exact: true }).click();
+
+  // The pairing code field lives on the page itself, not inside a sheet.
+  await page.getByPlaceholder("输入 6 位情侣码").click();
+  await expect(page.getByTestId("keyboard-dock")).toHaveAttribute("data-visible", "true");
+
+  await page.getByText("一人创建小铺，另一人输入情侣码加入").click();
+  await expect(page.getByTestId("keyboard-dock")).toHaveAttribute("data-visible", "false");
+});
+
+test("the bottom navigation is never left behind the keyboard", async ({ page }) => {
+  await enter(page);
+  await page.getByRole("button", { name: "我们", exact: true }).click();
+  await page.getByPlaceholder("输入 6 位情侣码").click();
+  await expect(page.getByTestId("keyboard-dock")).toHaveAttribute("data-visible", "true");
+
+  // Every tab must be tappable for real, not merely present in the DOM: with
+  // the keyboard up it covered roughly 40% of the screen, nav included.
+  // The bar animates up over the keyboard; measure where it comes to rest.
+  const nav = page.locator(".bottom-nav");
+  await expect(async () => {
+    const bar = (await nav.boundingBox())!;
+    const dock = (await page.getByTestId("keyboard-dock").boundingBox())!;
+    expect(bar.y + bar.height, "the tab bar sits behind the keyboard").toBeLessThanOrEqual(dock.y + 1);
+  }).toPass({ timeout: 4000 });
+
+  for (const tab of ["小铺", "任务", "订单", "回忆", "我们"]) {
+    await expect(page.getByRole("button", { name: tab, exact: true })).toBeVisible();
+  }
+});
+
+test("changing page lowers a keyboard left open on the previous one", async ({ page }) => {
+  await enter(page);
+  await page.getByRole("button", { name: "我们", exact: true }).click();
+  await page.getByPlaceholder("输入 6 位情侣码").click();
+  await expect(page.getByTestId("keyboard-dock")).toHaveAttribute("data-visible", "true");
+
+  await page.getByRole("button", { name: "回忆", exact: true }).click();
+  await expect(page.getByTestId("keyboard-dock")).toHaveAttribute("data-visible", "false");
+});
+
+/**
+ * The symptom to guard: `data-visible` reads "false" while the dock is still
+ * sitting over the page. Measured after the exit animation has had time to
+ * finish, so a dock that stops halfway is a failure rather than a slow pass.
+ */
+test("a dismissed keyboard returns all the way to its parked position", async ({ page }) => {
+  await enter(page);
+  await page.getByRole("button", { name: "我们", exact: true }).click();
+
+  for (const dismiss of ["outside-tap", "page-change"] as const) {
+    await page.getByPlaceholder("输入 6 位情侣码").click();
+    await expect(page.getByTestId("keyboard-dock")).toHaveAttribute("data-visible", "true");
+    if (dismiss === "outside-tap") await page.getByText("一人创建小铺，另一人输入情侣码加入").click();
+    else await page.getByRole("button", { name: "回忆", exact: true }).click();
+    await expect(page.getByTestId("keyboard-dock")).toHaveAttribute("data-visible", "false");
+
+    await page.waitForTimeout(800);
+    const screen = (await page.getByTestId("device-screen").boundingBox())!;
+    const dock = (await page.getByTestId("keyboard-dock").boundingBox())!;
+    const intrusion = Math.round(Math.max(0, screen.y + screen.height - dock.y));
+    expect(intrusion, `${dismiss} left ${intrusion}px of keyboard on screen`).toBeLessThanOrEqual(1);
+    if (dismiss === "page-change") await page.getByRole("button", { name: "我们", exact: true }).click();
+  }
+});
+
 test("a bottom sheet never paints outside the bezel while it opens", async ({ page }) => {
   await enter(page);
   await page.getByRole("button", { name: "加入缤纷水果茶" }).click();

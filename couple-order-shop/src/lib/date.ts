@@ -41,6 +41,13 @@ export function thisMonthKey(): string {
   return dateKey().slice(0, 7);
 }
 
+/** "2026-08" as the couple would read it, with this year's month left bare. */
+export function formatMonthKey(monthKey: string, today: string = dateKey()): string {
+  const [year, month] = monthKey.split("-");
+  const label = `${Number(month)} 月`;
+  return year === today.slice(0, 4) ? label : `${year} 年 ${label}`;
+}
+
 /** Parses `YYYY-MM-DD` into a UTC-midnight anchor for calendar-only math. */
 function anchorOf(key: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);

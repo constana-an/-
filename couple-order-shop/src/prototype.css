@@ -109,7 +109,9 @@ button:focus-visible { outline: 3px solid rgba(240, 111, 148, .32); outline-offs
 .add-button:active { transform: scale(.94); }
 
 .bottom-spacer { height: 36px; }
-.bottom-nav { position: absolute; z-index: 12; left: 14px; right: 14px; bottom: calc(var(--mobile-safe-area-height) + 9px); height: 68px; padding: 6px 8px; border: 1px solid rgba(240,111,148,.12); border-radius: 24px; display: grid; grid-template-columns: repeat(5,1fr); background: rgba(255,255,255,.92); box-shadow: 0 10px 35px rgba(89, 52, 68, .15); backdrop-filter: blur(18px); }
+/* `bottom` is set inline from useKeyboardInsets().bottomInset so the bar rides
+   above the keyboard instead of hiding behind it; this is only the fallback. */
+.bottom-nav { position: absolute; z-index: 12; left: 14px; right: 14px; bottom: calc(var(--mobile-safe-area-height) + 9px); height: 68px; transition: bottom .28s ease; padding: 6px 8px; border: 1px solid rgba(240,111,148,.12); border-radius: 24px; display: grid; grid-template-columns: repeat(5,1fr); background: rgba(255,255,255,.92); box-shadow: 0 10px 35px rgba(89, 52, 68, .15); backdrop-filter: blur(18px); }
 .bottom-nav button { position: relative; border: 0; border-radius: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; background: transparent; color: #b0a1aa; }
 .bottom-nav button svg { width: 19px; height: 19px; }
 .bottom-nav button span { font-size: 12px; font-weight: 700; }
@@ -506,9 +508,11 @@ button:focus-visible { outline: 3px solid rgba(240, 111, 148, .32); outline-offs
 .onboarding-icon svg { width: 22px; height: 22px; }
 .onboarding-step h3 { margin: 14px 0 0; font-size: 15px; }
 .onboarding-step p { margin: 8px 0 0; color: #9c8f96; font-size: 12px; line-height: 1.75; }
-.onboarding-dots { margin-top: 16px; display: flex; justify-content: center; gap: 6px; }
-.onboarding-dots i { width: 6px; height: 6px; border-radius: 50%; background: #ead9e0; }
-.onboarding-dots i.on { width: 18px; border-radius: 99px; background: var(--pink); }
+/* The stepped guide is gone; this is the one thing the opening checklist on the
+   shop page cannot explain, so it gets its own block instead of a step. */
+.onboarding-note { margin-top: 14px; padding: 14px 16px; border-radius: 18px; background: #fff8ea; }
+.onboarding-note strong { display: block; color: #9a7434; font-size: 12px; }
+.onboarding-note p { margin: 6px 0 0; color: #a3835a; font-size: 12px; line-height: 1.75; }
 .privacy-section { padding: 13px; border-radius: 18px; display: flex; background: #fff7f9; }
 .privacy-section + .privacy-section { margin-top: 9px; }
 .privacy-section > span { width: 35px; height: 35px; flex: 0 0 35px; border-radius: 11px; display: grid; place-items: center; color: #d55b7f; background: white; }
@@ -563,3 +567,19 @@ button:focus-visible { outline: 3px solid rgba(240, 111, 148, .32); outline-offs
   outline-offset: 2px !important;
   border-radius: 4px;
 }
+
+/* Adding to the Home Screen is a Safari-menu chore the page cannot do itself,
+   so all it can offer is the exact sequence of taps. */
+.install-help { padding: 2px 2px calc(var(--mobile-safe-area-height) + 16px); }
+.install-help ol { margin: 0; padding-left: 20px; display: grid; gap: 10px; color: #7d7079; font-size: 13px; line-height: 1.65; }
+.install-help ol strong { color: var(--pink-dark); }
+.install-help > p { margin: 14px 0 0; padding: 12px 14px; border-radius: 16px; background: #fff8ea; color: #a3835a; font-size: 12px; line-height: 1.7; }
+.install-help .account-primary { margin-top: 16px; }
+
+/* Grouped by month so a long history stays readable, and nothing is dropped:
+   older months arrive behind the button rather than being truncated away. */
+.timeline-month { margin-top: 14px; }
+.timeline-month h4 { margin: 0 0 8px; display: flex; align-items: center; gap: 8px; color: #a2949c; font-size: 12px; font-weight: 700; }
+.timeline-month h4::after { content: ""; flex: 1; height: 1px; background: rgba(160,140,150,.16); }
+.timeline-month h4 span { order: 1; min-width: 20px; padding: 2px 7px; border-radius: 99px; background: #fff0f4; color: #d5577d; font-size: 11px; text-align: center; }
+.timeline-more { width: 100%; margin-top: 14px; min-height: 46px; border: 1px solid rgba(235,125,158,.16); border-radius: 16px; background: #fff; color: #d5577d; font-size: 13px; font-weight: 700; }

@@ -1,19 +1,25 @@
-import { useState } from "react";
-import { ArchiveIcon, HeartFilledIcon, TargetIcon } from "@radix-ui/react-icons";
+import { HeartFilledIcon } from "@radix-ui/react-icons";
 import { BottomSheet } from "../mobile";
 import { MENU, TASKS } from "../lib/catalog";
 import { OPENING_BALANCE } from "../lib/storage";
+import { cloudEnabled } from "../lib/supabase";
 
 const CHEAPEST = Math.min(...MENU.map((item) => item.price));
 const DEAREST = Math.max(...MENU.map((item) => item.price));
 const DAILY_REWARD = TASKS.filter((task) => task.frequency === "daily").reduce((sum, task) => sum + task.reward, 0);
-const WEEKLY_REWARD = TASKS.filter((task) => task.frequency === "weekly").reduce((sum, task) => sum + task.reward, 0);
+
+/** What `public.grant_pairing_bonus` credits each partner the first time they pair. */
+export const PAIRING_BONUS = 20;
 
 /**
- * A new wallet opens at 8 coins while the cheapest wish costs 28, so without an
- * explanation the first screen reads as "everything is locked". These three
- * steps say how the coins arrive and end on the fastest way to earn the first
- * one.
+ * One screen, not three. The opening checklist on the shop page already walks
+ * people through account → pairing → notifications → first wish, so a stepped
+ * guide covering the same ground meant sitting through two onboardings to
+ * arrive at the same place.
+ *
+ * What the checklist cannot explain is why a wallet holding 8 coins is looking
+ * at a menu starting at 28 — so that is what this keeps, with the arithmetic
+ * the pairing bonus actually produces rather than the pre-bonus "三四天".
  */
 export function OnboardingSheet({
   open,
@@ -25,46 +31,39 @@ export function OnboardingSheet({
   /** `goToTasks` sends the reader straight to their first claimable task. */
   onFinish: (goToTasks: boolean) => void;
 }) {
-  const [step, setStep] = useState(0);
-  const steps = [
-    {
-      icon: <HeartFilledIcon />,
-      title: `挑一个心愿，送给${partnerName}`,
-      body: `小铺里有 ${MENU.length} 个固定心愿，从 ${CHEAPEST} 甜心币的小甜品，到 ${DEAREST} 甜心币的限定券。`,
-    },
-    {
-      icon: <TargetIcon />,
-      title: "先做任务，攒够甜心币",
-      body: `你现在有 ${OPENING_BALANCE} 甜心币，最便宜的心愿要 ${CHEAPEST} 币。每日任务最多 +${DAILY_REWARD}，每周任务再 +${WEEKLY_REWARD}，签到每天 +1，认真做三四天就能点第一份。`,
-    },
-    {
-      icon: <ArchiveIcon />,
-      title: `等${partnerName}接单并完成`,
-      body: `对方可以接单，也可以婉拒；婉拒会把甜心币原路退回给你。完成的心愿会自动排进「回忆」的时间线，想补照片也可以。`,
-    },
-  ];
-  const current = steps[step];
-  const last = step === steps.length - 1;
   return (
     <BottomSheet
       open={open}
       onOpenChange={(next) => !next && onFinish(false)}
-      title="三步开张你们的小铺"
-      description={`第 ${step + 1} / ${steps.length} 步`}
-      snap={0.68}
+      title="这间小铺怎么开"
+      description={`你和${partnerName}互相点单，用甜心币结账`}
+      snap={0.62}
     >
       <div className="onboarding-sheet">
         <div className="onboarding-step">
-          <span className="onboarding-icon">{current.icon}</span>
-          <h3>{current.title}</h3>
-          <p>{current.body}</p>
+          <span className="onboarding-icon"><HeartFilledIcon /></span>
+          <h3>{MENU.length} 个心愿，{CHEAPEST} 到 {DEAREST} 甜心币</h3>
+          <p>
+            从一杯奶茶到「一整天听你安排」。点单花的是你自己的甜心币，
+            {partnerName}可以接单也可以婉拒——婉拒会原路退给你。
+          </p>
         </div>
-        <div className="onboarding-dots" aria-hidden="true">
-          {steps.map((item, index) => <i key={item.title} className={index === step ? "on" : ""} />)}
+        <div className="onboarding-note">
+          <strong>甜心币从哪来</strong>
+          {cloudEnabled ? (
+            <p>
+              开张先给 {OPENING_BALANCE} 枚。和{partnerName}连上双人小铺后两个人各再得 {PAIRING_BONUS} 枚，
+              加起来正好 {OPENING_BALANCE + PAIRING_BONUS} 枚——当天就能点第一份。
+              之后靠每日任务（最多 +{DAILY_REWARD}）和签到慢慢攒。
+            </p>
+          ) : (
+            <p>
+              开张先给 {OPENING_BALANCE} 枚，最便宜的心愿 {CHEAPEST} 枚。
+              每日任务最多 +{DAILY_REWARD}，签到每天 +1，认真做三四天就能点第一份。
+            </p>
+          )}
         </div>
-        <button className="account-primary" onClick={() => (last ? onFinish(true) : setStep(step + 1))}>
-          {last ? "去领第一个任务" : "下一步"}
-        </button>
+        <button className="account-primary" onClick={() => onFinish(true)}>去领第一个任务</button>
         <button className="auth-link" onClick={() => onFinish(false)}>先自己逛逛</button>
       </div>
     </BottomSheet>

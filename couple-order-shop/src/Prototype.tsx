@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
   BellIcon,
@@ -20,7 +20,7 @@ import {
   ArchiveIcon,
   TrashIcon,
 } from "@radix-ui/react-icons";
-import { BottomSheet, KeyboardInput, MobileScroll, useKeyboard } from "./mobile";
+import { BottomSheet, KeyboardInput, MobileScroll, useKeyboard, useKeyboardInsets } from "./mobile";
 import { DESIRED_TIMES, MENU, WISH_TEMPLATES, categoryMeta, earnedInWeek, reachedMilestones, statusText, taskClaimKey } from "./lib/catalog";
 import { dayKeyOf, formatStartedOn, isValidDateKey, normalizeDateInput, relationshipDays, todayKey } from "./lib/date";
 import { checkinStatusFrom, checkinStreak, dueAnniversaries } from "./lib/date";
@@ -74,6 +74,22 @@ import { TasksScreen } from "./screens/TasksScreen";
 
 /** iOS only exposes `Notification` in a secure context on 16.4+. */
 const notificationsSupported = typeof window !== "undefined" && "Notification" in window;
+
+/**
+ * Web Push needs a push service, not just permission. On iPhone Safari
+ * `PushManager` does not exist until the site has been added to the Home
+ * Screen, which is why "开启通知" has to come after "添加到主屏幕" — and why a
+ * browser that will never have it must not be handed the step at all.
+ */
+const pushCapable = () =>
+  notificationsSupported && typeof navigator !== "undefined"
+  && "serviceWorker" in navigator && "PushManager" in window;
+
+/** Installed to the Home Screen, where iOS finally allows push. */
+const isInstalled = () =>
+  typeof window !== "undefined"
+  && (window.matchMedia("(display-mode: standalone)").matches
+    || (window.navigator as Navigator & { standalone?: boolean }).standalone === true);
 
 /** Signed photo URLs live for an hour; re-sign once they get close to that. */
 const SIGNED_URL_TTL_SECONDS = 3600;
@@ -163,6 +179,36 @@ async function dropSubscription(client: SupabaseClient | null) {
   await subscription.unsubscribe().catch(() => undefined);
 }
 
+/**
+ * Title, subtitle and primary button for the account sheet, from one place.
+ * They used to be three separate ternaries down the JSX, which is how an
+ * anonymous upgrade ended up calling itself 升级账户 on the tab, 创建正式账户 in
+ * the title and 保护现有数据 on the button — and how 找回账户 kept a subtitle
+ * about not relying on anonymous accounts.
+ */
+function authSheetCopy(mode: AuthMode, upgrading: boolean, otpSent: boolean) {
+  switch (mode) {
+    case "recover":
+      return { title: "找回账户", description: "输入注册邮箱，我们发一封重置邮件给你", primary: "发送重置邮件" };
+    case "new-password":
+      return { title: "设置新密码", description: "设好之后用新密码登录即可", primary: "保存新密码" };
+    case "phone":
+      return {
+        title: "手机号登录",
+        description: otpSent ? "验证码已发送，填进来就能登录" : "收到短信验证码后即可登录",
+        primary: otpSent ? "验证并登录" : "发送验证码",
+      };
+    case "signup":
+      return upgrading
+        ? { title: "升级账户", description: "现在的订单、任务和回忆都会保留，换手机也能登录回来", primary: "升级并保留数据" }
+        : { title: "注册账户", description: "注册后换手机登录即可回到这间小铺", primary: "注册账户" };
+    default:
+      // Not just "登录": the tab above it already says that, and two controls
+      // with the same word is the kind of thing this table exists to prevent.
+      return { title: "登录账户", description: "用注册过的邮箱登录，回到你们的小铺", primary: "登录并进入小铺" };
+  }
+}
+
 function newId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
   return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
@@ -181,6 +227,10 @@ function readDeepLink(): { view: MainView | null; orderId: string | null } {
 
 export default function Prototype() {
   const keyboard = useKeyboard();
+  // Fixed bottom chrome has to ride the keyboard, per the runtime contract:
+  // pinned to the safe area alone it sits *behind* the keyboard, which left the
+  // tab bar unreachable — and with it every way off the page.
+  const { bottomInset } = useKeyboardInsets();
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const [identity, setIdentity] = useState<Identity | null>(loadIdentity);
   const [profile, setProfile] = useState<CoupleProfile>(loadCoupleProfile);
@@ -219,6 +269,8 @@ export default function Prototype() {
     subscribed: false,
   }));
   const [pushRotation, setPushRotation] = useState(0);
+  const [installed, setInstalled] = useState(isInstalled);
+  const [installHelpOpen, setInstallHelpOpen] = useState(false);
   const [cloudCoupleId, setCloudCoupleId] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.cloudId));
   const [inviteCode, setInviteCode] = useState<string | null>(() => localStorage.getItem(STORAGE_KEYS.inviteCode));
   const [pairingCode, setPairingCode] = useState("");
@@ -231,6 +283,10 @@ export default function Prototype() {
   const [authPhone, setAuthPhone] = useState("");
   const [authOtp, setAuthOtp] = useState("");
   const [phoneOtpSent, setPhoneOtpSent] = useState(false);
+  // An anonymous account being upgraded keeps its data; a brand new one has none.
+  const upgradingAnonymous = Boolean(authUser?.is_anonymous);
+  const protectedAccount = Boolean(authUser && !authUser.is_anonymous);
+  const authCopy = authSheetCopy(authMode, upgradingAnonymous, phoneOtpSent);
   const [authBusy, setAuthBusy] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(
     () => localStorage.getItem(STORAGE_KEYS.privacyAccepted) === "1",
@@ -458,6 +514,39 @@ export default function Prototype() {
     localStorage.setItem(milestonesKey(identity), JSON.stringify([...celebrated, ...fresh.map((item) => item.id)]));
     showToast(`🎉 ${newest.title}`);
   }, [identity, profile.startedOn, orders, checkin.streak, wallet.checkins, cloudCoupleId, showToast]);
+
+  /**
+   * The keyboard covers about 40% of the screen, including the bottom
+   * navigation, and the runtime only lowers it when something asks. Sheets
+   * already do on close; a field that lives on a page — the pairing code — had
+   * nothing, so tapping elsewhere left the keyboard up with the nav behind it.
+   *
+   * Changing page puts it away too, which covers every route in: the tab bar,
+   * the bell, deep links and the buttons that jump between screens.
+   */
+  useEffect(() => {
+    keyboard.hide();
+    // `hide` is rebuilt on every keyboard state change; depending on it here
+    // would re-run this on the keyboard's own updates rather than on the view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  const dismissKeyboardOnOutsideTap = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    if (!keyboard.visible) return;
+    if ((event.target as HTMLElement).closest("input, textarea")) return;
+    keyboard.hide();
+  }, [keyboard]);
+
+  useEffect(() => {
+    const recheck = () => setInstalled(isInstalled());
+    const media = window.matchMedia("(display-mode: standalone)");
+    media.addEventListener("change", recheck);
+    document.addEventListener("visibilitychange", recheck);
+    return () => {
+      media.removeEventListener("change", recheck);
+      document.removeEventListener("visibilitychange", recheck);
+    };
+  }, []);
 
   useEffect(() => {
     const { view: deepView, orderId } = readDeepLink();
@@ -1602,14 +1691,27 @@ export default function Prototype() {
         action: () => setView("ours"),
         cta: "去连接双人小铺",
       },
-      {
+      // Installing comes first because on iPhone it is what makes push exist
+      // at all. Once installed the step drops off instead of sitting ticked.
+      ...(installed ? [] : [{
+        id: "install",
+        title: "添加到主屏幕",
+        detail: "Safari 分享菜单 →「添加到主屏幕」，之后才能收通知",
+        done: false,
+        action: () => setInstallHelpOpen(true),
+        cta: "怎么添加",
+      }]),
+      // A browser with no push service would leave this permanently unticked
+      // and the checklist permanently on screen, so it is only offered where it
+      // can actually be finished.
+      ...(pushCapable() ? [{
         id: "push",
         title: "开启消息通知",
         detail: "对方下单或回应时收到提醒",
         done: pushState.subscribed,
         action: enableNotifications,
         cta: "去开启通知",
-      },
+      }] : []),
     ] : []),
     {
       id: "order",
@@ -1624,7 +1726,7 @@ export default function Prototype() {
   return (
     <div className="app-shell">
       <MobileScroll className="app-screen">
-        <main className="screen-content couple-shop" aria-label="情侣点单小铺">
+        <main className="screen-content couple-shop" aria-label="情侣点单小铺" onPointerDown={dismissKeyboardOnOutsideTap}>
           <header className="top-bar">
             <div className="brand-mark"><HeartFilledIcon /></div>
             <div className="brand-copy"><span>{profile.firstName} & {profile.secondName}</span><h1>{profile.shopName}</h1></div>
@@ -1738,7 +1840,7 @@ export default function Prototype() {
         </main>
       </MobileScroll>
 
-      <nav className="bottom-nav" aria-label="主要导航">
+      <nav className="bottom-nav" aria-label="主要导航" style={{ bottom: bottomInset + 9 }}>
         <button className={view === "shop" ? "active" : ""} onClick={() => setView("shop")}><HomeIcon /><span>小铺</span></button>
         <button className={view === "tasks" ? "active" : ""} onClick={() => setView("tasks")}><TargetIcon /><span>任务</span></button>
         <button className={view === "orders" ? "active" : ""} onClick={() => setView("orders")}><ArchiveIcon />{activeOrders > 0 && <i />}<span>订单</span></button>
@@ -1832,7 +1934,12 @@ export default function Prototype() {
         </div>
       </BottomSheet>
 
-      <BottomSheet open={authOpen} onOpenChange={(open) => (open ? setAuthOpen(true) : closeAuth())} title={authUser && !authUser.is_anonymous ? "账户中心" : authMode === "signup" ? "创建正式账户" : authMode === "recover" ? "找回账户" : authMode === "new-password" ? "设置新密码" : authMode === "phone" ? "手机号登录" : "登录账户"} description={authUser && !authUser.is_anonymous ? "账户已保护，换手机登录即可恢复" : "不再依赖匿名账户，数据跟随你的登录账户"}>
+      <BottomSheet
+        open={authOpen}
+        onOpenChange={(open) => (open ? setAuthOpen(true) : closeAuth())}
+        title={protectedAccount ? "账户中心" : authCopy.title}
+        description={protectedAccount ? "账户已保护，换手机登录即可恢复" : authCopy.description}
+      >
         <div className="account-sheet">
           {authUser && !authUser.is_anonymous ? (
             <>
@@ -1854,11 +1961,11 @@ export default function Prototype() {
               ) : (
                 <>
                   <label className="account-field"><span>邮箱</span><KeyboardInput value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} inputMode="email" autoCapitalize="none" placeholder="name@example.com" /></label>
-                  {authMode !== "recover" && <label className="account-field"><span>密码</span><KeyboardInput value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} type="password" placeholder="至少 6 位" /></label>}
+                  {authMode !== "recover" && <label className="account-field"><span>{authMode === "signup" ? "设置密码" : "密码"}</span><KeyboardInput value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} type="password" placeholder="至少 6 位" /></label>}
                 </>
               )}
               {authMode === "signup" && <button className={`privacy-consent ${privacyAccepted ? "selected" : ""}`} onClick={() => { const next = !privacyAccepted; setPrivacyAccepted(next); localStorage.setItem(STORAGE_KEYS.privacyAccepted, next ? "1" : "0"); }}><span>{privacyAccepted ? <CheckIcon /> : null}</span><p>我已阅读并同意《用户协议》和《隐私政策》</p></button>}
-              <button className="account-primary" disabled={authBusy} onClick={submitAuth}>{authBusy ? "处理中…" : authMode === "recover" ? "发送重置邮件" : authMode === "new-password" ? "保存新密码" : authMode === "phone" ? phoneOtpSent ? "验证并登录" : "发送验证码" : authMode === "signup" ? authUser?.is_anonymous ? "保护现有数据" : "注册账户" : "登录并恢复"}</button>
+              <button className="account-primary" disabled={authBusy} onClick={submitAuth}>{authBusy ? "处理中…" : authCopy.primary}</button>
               {authMode === "signin" && <button className="auth-link" onClick={() => setAuthMode("recover")}>忘记密码？找回账户</button>}
               {(authMode === "recover" || authMode === "phone") && <button className="auth-link" onClick={() => { setAuthMode("signin"); setPhoneOtpSent(false); }}>返回邮箱登录</button>}
               {/* Only providers this deployment has actually configured are
@@ -1951,6 +2058,19 @@ export default function Prototype() {
               {editingAnniversaryId && <button className="account-danger" onClick={() => setConfirmDelete("anniversary")}><TrashIcon /> 删除这个纪念日</button>}
             </>
           )}
+        </div>
+      </BottomSheet>
+
+      <BottomSheet open={installHelpOpen} onOpenChange={setInstallHelpOpen} title="添加到主屏幕" description="装好之后才能收到对方的消息通知">
+        <div className="install-help">
+          <ol>
+            <li>用 <strong>Safari</strong> 打开这个网址（微信或其它 App 里的浏览器不行）</li>
+            <li>点底部中间的 <strong>分享</strong> 按钮</li>
+            <li>下滑选择 <strong>添加到主屏幕</strong></li>
+            <li>回到主屏幕，从新图标打开小铺</li>
+          </ol>
+          <p>装好后回到「我们」页开启通知，对方下单时你就能收到提醒。</p>
+          <button className="account-primary" onClick={() => setInstallHelpOpen(false)}>知道了</button>
         </div>
       </BottomSheet>
 

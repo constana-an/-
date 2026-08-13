@@ -197,3 +197,32 @@ test("the album explains itself instead of dead-ending", async ({ page }) => {
   await expect(page.getByRole("button", { name: /小铺设置/ })).toBeVisible();
   await expect(page.getByText("连接两台 iPhone")).toBeVisible();
 });
+
+test("the timeline keeps every finished wish, grouped by month", async ({ page }) => {
+  // 22 finished wishes across two months: more than one page, so the older
+  // month is only reachable if nothing was silently truncated away.
+  const seeded = Array.from({ length: 22 }, (_, index) => {
+    const month = index < 12 ? "07" : "08";
+    const day = String((index % 12) + 1).padStart(2, "0");
+    return {
+      id: `seed-${index}`, itemId: "fruit-tea", itemName: `心愿 ${index}`,
+      image: "/assets/menu/fruit-tea.png", price: 28, note: "", desiredTime: "尽快",
+      from: "大宝", to: "二宝", status: "done",
+      createdAt: `2026-${month}-${day}T10:00:00.000Z`,
+      completedAt: `2026-${month}-${day}T12:00:00.000Z`,
+    };
+  });
+  await enterAs(page, "大宝", { "couple-shop-orders": JSON.stringify(seeded) });
+  await page.getByRole("button", { name: "回忆", exact: true }).click();
+
+  await expect(page.locator(".memory-timeline li")).toHaveCount(20);
+  const more = page.getByRole("button", { name: /还有 2 件/ });
+  await expect(more).toBeVisible();
+
+  await more.click();
+  await expect(page.locator(".memory-timeline li")).toHaveCount(22);
+  await expect(page.getByRole("button", { name: /还有/ })).toHaveCount(0);
+  // The oldest wish must be reachable, not quietly dropped off the end.
+  await expect(page.locator(".memory-timeline li", { hasText: "心愿 0" })).toBeVisible();
+  await expect(page.locator(".timeline-month h4")).toHaveCount(2);
+});
