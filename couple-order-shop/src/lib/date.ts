@@ -1,3 +1,5 @@
+import type { Lang } from "./i18n.ts";
+
 /**
  * All period keys (daily task refresh, weekly task refresh, check-in day) are
  * anchored to a single shop timezone instead of the device timezone or UTC.
@@ -9,6 +11,17 @@
  * could be claimed twice in one week.
  */
 export const APP_TIME_ZONE = "Asia/Shanghai";
+
+/**
+ * Month names are spelled out rather than taken from `Intl` so a date key is
+ * formatted from its own digits, with no chance of a timezone shifting it a day
+ * either way. The default stays Chinese: every caller that has not been taught
+ * about the language switch keeps the wording it always had.
+ */
+const EN_MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
 const dayKeyFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: APP_TIME_ZONE,
@@ -42,10 +55,15 @@ export function thisMonthKey(): string {
 }
 
 /** "2026-08" as the couple would read it, with this year's month left bare. */
-export function formatMonthKey(monthKey: string, today: string = dateKey()): string {
+export function formatMonthKey(monthKey: string, today: string = dateKey(), lang: Lang = "zh"): string {
   const [year, month] = monthKey.split("-");
+  const thisYear = year === today.slice(0, 4);
+  if (lang === "en") {
+    const label = EN_MONTHS[Number(month) - 1] ?? monthKey;
+    return thisYear ? label : `${label} ${year}`;
+  }
   const label = `${Number(month)} 月`;
-  return year === today.slice(0, 4) ? label : `${year} 年 ${label}`;
+  return thisYear ? label : `${year} 年 ${label}`;
 }
 
 /** Parses `YYYY-MM-DD` into a UTC-midnight anchor for calendar-only math. */
@@ -91,9 +109,11 @@ export function relationshipDays(startedOn: string): number {
   return Math.max(1, daysBetween(startedOn, todayKey()) + 1);
 }
 
-export function formatStartedOn(startedOn: string): string {
+export function formatStartedOn(startedOn: string, lang: Lang = "zh"): string {
   const [year, month, day] = startedOn.split("-");
-  return year && month && day ? `${year} 年 ${Number(month)} 月 ${Number(day)} 日` : "尚未设置";
+  if (!year || !month || !day) return lang === "en" ? "Not set yet" : "尚未设置";
+  if (lang === "en") return `${EN_MONTHS[Number(month) - 1] ?? month} ${Number(day)}, ${year}`;
+  return `${year} 年 ${Number(month)} 月 ${Number(day)} 日`;
 }
 
 /** Progressively formats digits typed into a date field as `YYYY-MM-DD`. */
@@ -163,9 +183,11 @@ export function checkinStatusFrom(days: readonly string[], today: string = today
   return { streak: checkinStreak(days, today), checkedToday: days.includes(today) };
 }
 
-export function relativeTime(value: string): string {
+export function relativeTime(value: string, lang: Lang = "zh"): string {
   const minutes = Math.max(1, Math.round((Date.now() - new Date(value).getTime()) / 60000));
-  if (minutes < 60) return `${minutes} 分钟前`;
-  if (minutes < 1440) return `${Math.floor(minutes / 60)} 小时前`;
-  return `${Math.floor(minutes / 1440)} 天前`;
+  if (minutes < 60) return lang === "en" ? `${minutes} min ago` : `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (minutes < 1440) return lang === "en" ? `${hours} h ago` : `${hours} 小时前`;
+  const days = Math.floor(minutes / 1440);
+  return lang === "en" ? `${days} d ago` : `${days} 天前`;
 }

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CheckIcon, ChevronDownIcon } from "@radix-ui/react-icons";
+import { useI18n } from "../i18n";
 
 export type OpeningStep = { id: string; title: string; detail: string; done: boolean; action?: () => void; cta?: string };
 
@@ -15,16 +16,17 @@ export type OpeningStep = { id: string; title: string; detail: string; done: boo
  * anyone who wants to see how far there is to go.
  */
 export function OpeningProgress({ steps, onDismiss }: { steps: OpeningStep[]; onDismiss: () => void }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const done = steps.filter((step) => step.done).length;
   if (done === steps.length) return null;
   const next = steps.find((step) => !step.done)!;
 
   return (
-    <section className="opening-progress" aria-label="开张进度">
+    <section className="opening-progress" aria-label={t("opening.aria")}>
       <div className="opening-head">
-        <span>下一步 · 还差 {steps.length - done} 步开张</span>
-        <button className="opening-skip" onClick={onDismiss}>以后再说</button>
+        <span>{t("opening.next", { count: steps.length - done })}</span>
+        <button className="opening-skip" onClick={onDismiss}>{t("opening.later")}</button>
       </div>
 
       <strong className="opening-next-title">{next.title}</strong>
@@ -34,7 +36,7 @@ export function OpeningProgress({ steps, onDismiss }: { steps: OpeningStep[]; on
       )}
 
       <button className="opening-toggle" aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>
-        {expanded ? "收起" : `看看全部 ${steps.length} 步`}
+        {expanded ? t("common.collapse") : t("opening.showAll", { count: steps.length })}
         <ChevronDownIcon className={expanded ? "is-open" : ""} />
       </button>
       {expanded && (

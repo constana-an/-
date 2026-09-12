@@ -25,6 +25,12 @@ export type MenuItem = {
   limited?: boolean;
   /** Written by this couple rather than shipped with the shop; editable. */
   custom?: boolean;
+  /**
+   * English copy for a shipped item. Absent on a couple's own wish on purpose:
+   * their words are theirs, and the shop never restates them in another
+   * language.
+   */
+  en?: { name: string; description: string };
 };
 
 /** Prices a couple may put on their own wish, matching the server's check. */
@@ -68,6 +74,7 @@ export type CoupleTask = {
   tone: "pink" | "mint" | "gold" | "lavender";
   /** Absent for the tasks nothing in the data can witness; those stay manual. */
   requires?: TaskRequirement;
+  en?: { title: string; description: string };
 };
 
 export type MemoryEntry = {
@@ -118,10 +125,12 @@ export type Milestone = {
   threshold: number;
   title: string;
   body: string;
+  en?: { title: string; body: string };
 };
 
 export type MembershipState = {
-  planName: string;
+  /** The plan's own name from the server; null until one has been read. */
+  planName: string | null;
   status: string;
 };
 

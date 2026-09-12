@@ -56,6 +56,34 @@ button:focus-visible { outline: 3px solid rgba(240, 111, 148, .32); outline-offs
 .identity-brand { display: flex; align-items: center; gap: 9px; color: #b86a82; font-size: 12px; letter-spacing: .05em; }
 .identity-brand > span { width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; color: #fff; background: linear-gradient(145deg, #ff9bb5, #ec628b); box-shadow: 0 9px 22px rgba(234,87,129,.22); }
 .identity-brand svg { width: 17px; height: 17px; }
+/* The first screen has to offer the language switch too, so an English reader
+   is not asked to pick an identity in a language they cannot read. Colours are
+   the darker blush pair the contrast floor already forces elsewhere. */
+.identity-lang { margin-left: auto; display: flex; border-radius: 99px; background: rgba(255,255,255,.86); box-shadow: 0 5px 14px rgba(110,65,84,.08); }
+/* 44px like every other control in the app, not the 38 that looked right. */
+.identity-lang button { min-width: 56px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 99px; background: transparent; color: #7c7178; font-size: 12px; font-weight: 600; }
+.identity-lang button.is-active { background: #ffe6ee; color: #b84267; }
+
+/* English says in a line and a half what Chinese says in one, so the copy the
+   shop itself ships is allowed a second line while the page is in English.
+   Scoped to <html lang>, which the language provider keeps in step, so the
+   Chinese layout is untouched.
+
+   Only shop-written copy is freed. Names the couple typed — a wish title, a
+   memory caption, an anniversary — keep their single-line clamp in both
+   languages: a long one should still not be able to push the layout around. */
+html[lang^="en"] .menu-copy > p,
+html[lang^="en"] .task-copy p {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+html[lang^="en"] .menu-title-row h3 { white-space: normal; }
+/* "Waiting for a reply" is three times the width of 等对方回应, and a nowrap
+   badge would eat the order title beside it. */
+html[lang^="en"] .status-badge { max-width: 92px; white-space: normal; text-align: center; }
 .identity-welcome { margin-top: 72px; }
 .identity-welcome > span { color: #d76788; font-size: 11px; font-weight: 700; letter-spacing: .12em; }
 .identity-welcome h1 { margin: 8px 0 9px; font-size: 29px; line-height: 1.18; letter-spacing: -.055em; }

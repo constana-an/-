@@ -3,6 +3,7 @@ import { BottomSheet } from "../shell";
 import { MENU, TASKS } from "../lib/catalog";
 import { OPENING_BALANCE } from "../lib/storage";
 import { cloudEnabled } from "../lib/supabase";
+import { useI18n } from "../i18n";
 
 const CHEAPEST = Math.min(...MENU.map((item) => item.price));
 const DEAREST = Math.max(...MENU.map((item) => item.price));
@@ -31,40 +32,31 @@ export function OnboardingSheet({
   /** `goToTasks` sends the reader straight to their first claimable task. */
   onFinish: (goToTasks: boolean) => void;
 }) {
+  const { t } = useI18n();
   return (
     <BottomSheet
       open={open}
       onOpenChange={(next) => !next && onFinish(false)}
-      title="这间小铺怎么开"
-      description={`你和${partnerName}互相点单，用甜心币结账`}
+      title={t("onboard.title")}
+      description={t("onboard.desc", { partner: partnerName })}
       snap={0.62}
     >
       <div className="onboarding-sheet">
         <div className="onboarding-step">
           <span className="onboarding-icon"><HeartFilledIcon /></span>
-          <h3>{MENU.length} 个心愿，{CHEAPEST} 到 {DEAREST} 甜心币</h3>
-          <p>
-            从一杯奶茶到「一整天听你安排」。点单花的是你自己的甜心币，
-            {partnerName}可以接单也可以婉拒——婉拒会原路退给你。
-          </p>
+          <h3>{t("onboard.menuLine", { count: MENU.length, cheapest: CHEAPEST, dearest: DEAREST })}</h3>
+          <p>{t("onboard.body", { partner: partnerName })}</p>
         </div>
         <div className="onboarding-note">
-          <strong>甜心币从哪来</strong>
+          <strong>{t("onboard.coinsFrom")}</strong>
           {cloudEnabled ? (
-            <p>
-              开张先给 {OPENING_BALANCE} 枚。和{partnerName}连上双人小铺后两个人各再得 {PAIRING_BONUS} 枚，
-              加起来正好 {OPENING_BALANCE + PAIRING_BONUS} 枚——当天就能点第一份。
-              之后靠每日任务（最多 +{DAILY_REWARD}）和签到慢慢攒。
-            </p>
+            <p>{t("onboard.coinsCloud", { opening: OPENING_BALANCE, partner: partnerName, bonus: PAIRING_BONUS, total: OPENING_BALANCE + PAIRING_BONUS, daily: DAILY_REWARD })}</p>
           ) : (
-            <p>
-              开张先给 {OPENING_BALANCE} 枚，最便宜的心愿 {CHEAPEST} 枚。
-              每日任务最多 +{DAILY_REWARD}，签到每天 +1，认真做三四天就能点第一份。
-            </p>
+            <p>{t("onboard.coinsLocal", { opening: OPENING_BALANCE, cheapest: CHEAPEST, daily: DAILY_REWARD })}</p>
           )}
         </div>
-        <button className="account-primary" onClick={() => onFinish(true)}>去领第一个任务</button>
-        <button className="auth-link" onClick={() => onFinish(false)}>先自己逛逛</button>
+        <button className="account-primary" onClick={() => onFinish(true)}>{t("onboard.goTasks")}</button>
+        <button className="auth-link" onClick={() => onFinish(false)}>{t("onboard.browse")}</button>
       </div>
     </BottomSheet>
   );

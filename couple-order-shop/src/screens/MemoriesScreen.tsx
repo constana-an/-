@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { CalendarIcon, CameraIcon, HeartFilledIcon, ImageIcon, LockClosedIcon, Pencil1Icon, PlusIcon, StarFilledIcon, SunIcon } from "@radix-ui/react-icons";
 import { dayKeyOf, daysUntilAnniversary, formatMonthKey, formatStartedOn, isPastOneOff, monthKeyOf, relationshipDays, thisMonthKey } from "../lib/date";
-import { milestoneUnit, nextMilestone, reachedMilestones } from "../lib/catalog";
+import { localizedItemName, localizedMilestone, milestoneUnitOf, nextMilestone, reachedMilestones } from "../lib/catalog";
+import { localeOf, type Lang } from "../lib/i18n";
 import { cloudEnabled } from "../lib/supabase";
+import { useI18n } from "../i18n";
 import { MenuArt } from "./MenuArt";
 import type { Anniversary, CheckinStatus, CoupleProfile, MemoryEntry, Order } from "../lib/types";
 
@@ -11,14 +13,13 @@ const isPast = (item: Anniversary) => isPastOneOff(item.eventDate, item.repeatsY
 /** How many finished wishes to show before asking, and per tap after that. */
 const TIMELINE_PAGE = 20;
 
-const anniversaryHint = (item: Anniversary): string => {
-  if (isPast(item)) return "已经过去";
-  const days = daysUntilAnniversary(item.eventDate, item.repeatsYearly);
-  return days === 0 ? "就是今天" : `还有 ${days} 天`;
-};
-
 /** Past one-offs sink to the bottom instead of masquerading as "today". */
 const countdownOrder = (item: Anniversary) => (isPast(item) ? Number.MAX_SAFE_INTEGER : daysUntilAnniversary(item.eventDate, item.repeatsYearly));
+
+/** The stat tile is one line wide, so English gets digits rather than a month name. */
+const compactStartDate = (startedOn: string, lang: Lang): string => (lang === "en"
+  ? startedOn.replace(/-/g, ".")
+  : formatStartedOn(startedOn).replace(/ 年 | 月 | 日/g, ".").replace(/\.$/, ""));
 
 export function MemoriesScreen({
   orders,
@@ -52,6 +53,7 @@ export function MemoriesScreen({
   onPlanDate: () => void;
   onWriteWish: () => void;
 }) {
+  const { lang, t } = useI18n();
   const [timelineLimit, setTimelineLimit] = useState(TIMELINE_PAGE);
   const [historyOpen, setHistoryOpen] = useState(false);
   const done = orders.filter((order) => order.status === "done");
@@ -61,10 +63,15 @@ export function MemoriesScreen({
   // A wish ordered last month but finished today belongs to this month.
   const doneThisMonth = done.filter((order) => monthKeyOf(order.completedAt ?? order.createdAt) === month);
   const days = relationshipDays(profile.startedOn);
-  const monthLabel = new Intl.DateTimeFormat("zh-CN", { month: "long" }).format(new Date());
+  const monthLabel = new Intl.DateTimeFormat(localeOf(lang), { month: "long" }).format(new Date());
+  const anniversaryHint = (item: Anniversary): string => {
+    if (isPast(item)) return t("anniv.past");
+    const until = daysUntilAnniversary(item.eventDate, item.repeatsYearly);
+    return until === 0 ? t("anniv.today") : t("anniv.daysLeft", { days: until });
+  };
   const sortedAnniversaries = [...anniversaries].sort((a, b) => countdownOrder(a) - countdownOrder(b));
   const nextAnniversary = sortedAnniversaries[0];
-  const startedLabel = formatStartedOn(profile.startedOn).replace(/ 年 | 月 | 日/g, ".").replace(/\.$/, "");
+  const startedLabel = compactStartDate(profile.startedOn, lang);
   // The counters in stats-row have always been inert. These give them a place
   // to have arrived at, and a place to be heading.
   const counts = { days, wishes: done.length, streak: checkin.streak };
@@ -73,6 +80,7 @@ export function MemoriesScreen({
   // days, wishes and streaks cross their thresholds on their own schedules and
   // nothing records when. The history below is the complete answer.
   const headline = reached[reached.length - 1] ?? null;
+  const headlineCopy = headline ? localizedMilestone(headline, lang) : null;
   const upcoming = nextMilestone(counts);
   // Finished wishes are the couple's own history and need no curation: newest
   // first, straight from the order list. The album on top is for the photos
@@ -95,19 +103,23 @@ export function MemoriesScreen({
   }
   return (
     <section className="page-section memory-page">
-      <div className="memory-hero"><span>{monthLabel}的小小幸福</span><strong>{doneThisMonth.length}</strong><p>件这个月一起完成的心愿</p><div className="avatar-pair"><span>{profile.firstName.slice(0, 1)}</span><span>{profile.secondName.slice(0, 1)}</span></div></div>
-      <div className="stats-row"><div><HeartFilledIcon /><strong>{days}</strong><span>相爱天数</span></div><div><StarFilledIcon /><strong>{done.length}</strong><span>累计完成</span></div><div><CalendarIcon /><strong>{startedLabel}</strong><span>开始日期</span></div></div>
-      {(headline || upcoming) && (
-        <section className="milestone-card" aria-label="里程碑">
+      <div className="memory-hero"><span>{t("memories.heroTag", { month: monthLabel })}</span><strong>{doneThisMonth.length}</strong><p>{t("memories.heroBody")}</p><div className="avatar-pair"><span>{profile.firstName.slice(0, 1)}</span><span>{profile.secondName.slice(0, 1)}</span></div></div>
+      <div className="stats-row"><div><HeartFilledIcon /><strong>{days}</strong><span>{t("memories.statDays")}</span></div><div><StarFilledIcon /><strong>{done.length}</strong><span>{t("memories.statDone")}</span></div><div><CalendarIcon /><strong>{startedLabel}</strong><span>{t("memories.statStart")}</span></div></div>
+      {(headlineCopy || upcoming) && (
+        <section className="milestone-card" aria-label={t("memories.milestoneAria")}>
           <div className="milestone-reached">
             <span className="milestone-badge"><StarFilledIcon /></span>
-            {headline
-              ? <div><strong>{headline.title}</strong><p>{headline.body}</p></div>
-              : <div><strong>还没有里程碑</strong><p>完成第一个心愿，这里就会记下第一笔。</p></div>}
+            {headlineCopy
+              ? <div><strong>{headlineCopy.title}</strong><p>{headlineCopy.body}</p></div>
+              : <div><strong>{t("memories.noMilestone")}</strong><p>{t("memories.noMilestoneBody")}</p></div>}
           </div>
           {upcoming && (
             <p className="milestone-next">
-              再 {upcoming.remaining} {milestoneUnit[upcoming.milestone.kind]}，就是「{upcoming.milestone.title}」
+              {t("memories.nextMilestone", {
+                remaining: upcoming.remaining,
+                unit: milestoneUnitOf(lang, upcoming.milestone.kind, upcoming.remaining),
+                title: localizedMilestone(upcoming.milestone, lang).title,
+              })}
             </p>
           )}
           {/* The celebration toast is gone in two seconds and the card only
@@ -116,16 +128,19 @@ export function MemoriesScreen({
           {reached.length > 1 && (
             <>
               <button className="milestone-toggle" aria-expanded={historyOpen} onClick={() => setHistoryOpen((open) => !open)}>
-                {historyOpen ? "收起" : `看看走过的 ${reached.length} 个里程碑`}
+                {historyOpen ? t("common.collapse") : t("memories.milestoneHistory", { count: reached.length })}
               </button>
               {historyOpen && (
                 <ol className="milestone-history">
-                  {[...reached].reverse().map((milestone) => (
-                    <li key={milestone.id}>
-                      <strong>{milestone.title}</strong>
-                      <p>{milestone.body}</p>
-                    </li>
-                  ))}
+                  {[...reached].reverse().map((milestone) => {
+                    const copy = localizedMilestone(milestone, lang);
+                    return (
+                      <li key={milestone.id}>
+                        <strong>{copy.title}</strong>
+                        <p>{copy.body}</p>
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </>
@@ -134,12 +149,12 @@ export function MemoriesScreen({
       )}
       <div className="checkin-card">
         <span className="checkin-flame"><SunIcon /></span>
-        <div><small>连续签到</small><strong>{checkin.streak} 天</strong><p>每天回来看看，给自己的钱包 +1 甜心币</p></div>
-        <button disabled={checkin.checkedToday} onClick={onCheckin}>{checkin.checkedToday ? "今日已签" : "签到 +1"}</button>
+        <div><small>{t("memories.streak")}</small><strong>{t("memories.streakDays", { days: checkin.streak })}</strong><p>{t("memories.checkinHint")}</p></div>
+        <button disabled={checkin.checkedToday} onClick={onCheckin}>{checkin.checkedToday ? t("memories.checkedToday") : t("memories.checkin")}</button>
       </div>
       <div className="memory-section-heading">
-        <div><small>给时间线补上照片</small><h3>照片回忆</h3></div>
-        {paired && <button onClick={onAddMemory}><CameraIcon /> 添加</button>}
+        <div><small>{t("memories.photoTag")}</small><h3>{t("memories.photoTitle")}</h3></div>
+        {paired && <button onClick={onAddMemory}><CameraIcon /> {t("common.add")}</button>}
       </div>
       {!paired ? (
         // Photos live in the couple's private bucket. Offering the picker here
@@ -148,57 +163,57 @@ export function MemoriesScreen({
           <span><LockClosedIcon /></span>
           {cloudEnabled ? (
             <>
-              <strong>照片回忆需要双人空间</strong>
-              <p>照片存在你们的私密云空间里，两个人都能看到。去「我们」页创建小铺，或输入对方的情侣码。</p>
-              <button onClick={onPair}>去连接双人小铺</button>
+              <strong>{t("memories.photoLocked")}</strong>
+              <p>{t("memories.photoLockedBody")}</p>
+              <button onClick={onPair}>{t("memories.goPair")}</button>
             </>
           ) : (
             <>
-              <strong>本地体验模式没有相册</strong>
-              <p>这台设备还没有云配置。签到、纪念日和订单都会保存在本机，照片需要双人云空间才能收藏。</p>
+              <strong>{t("memories.localNoAlbum")}</strong>
+              <p>{t("memories.localNoAlbumBody")}</p>
             </>
           )}
         </div>
       ) : memories.length > 0 ? (
         <div className="memory-grid">
           {memories.map((memory) => (
-            <button type="button" key={memory.id} onClick={() => onOpenMemory(memory)} aria-label={`查看回忆 ${memory.caption}`}>
+            <button type="button" key={memory.id} onClick={() => onOpenMemory(memory)} aria-label={t("memories.viewAria", { caption: memory.caption })}>
               {memory.imageUrl ? <img src={memory.imageUrl} alt={memory.caption} draggable="false" /> : <span><ImageIcon /></span>}
               <div><strong>{memory.caption}</strong><small>{memory.happenedOn}</small></div>
             </button>
           ))}
         </div>
       ) : (
-        <button className="memory-empty" onClick={onAddMemory}><CameraIcon /><strong>收藏第一张合照</strong><span>照片私密保存在双人空间，只有你们两个能看到</span></button>
+        <button className="memory-empty" onClick={onAddMemory}><CameraIcon /><strong>{t("memories.firstPhoto")}</strong><span>{t("memories.firstPhotoHint")}</span></button>
       )}
-      <div className="memory-section-heading"><div><small>打开小铺时提醒你</small><h3>纪念日</h3></div><button onClick={onAddAnniversary}><PlusIcon /> 添加</button></div>
+      <div className="memory-section-heading"><div><small>{t("memories.annivTag")}</small><h3>{t("memories.annivTitle")}</h3></div><button onClick={onAddAnniversary}><PlusIcon /> {t("common.add")}</button></div>
       {nextAnniversary ? (
         <>
           <div className="anniversary-card">
-            <div><span><CalendarIcon /></span><div><small>下一个纪念日</small><strong>{nextAnniversary.title}</strong><p>{nextAnniversary.eventDate} · {anniversaryHint(nextAnniversary)}</p></div></div>
-            <button onClick={() => onEditAnniversary(nextAnniversary)}>管理</button>
+            <div><span><CalendarIcon /></span><div><small>{t("memories.nextAnniv")}</small><strong>{nextAnniversary.title}</strong><p>{nextAnniversary.eventDate} · {anniversaryHint(nextAnniversary)}</p></div></div>
+            <button onClick={() => onEditAnniversary(nextAnniversary)}>{t("memories.manage")}</button>
           </div>
           {/* Once it is close enough to be reminded about, the useful thing is
               not another reminder — it is somewhere to start. */}
           {daysUntilAnniversary(nextAnniversary.eventDate, nextAnniversary.repeatsYearly) <= nextAnniversary.reminderDays && (
             <div className="anniversary-ideas">
-              <strong>为「{nextAnniversary.title}」做点什么？</strong>
+              <strong>{t("memories.annivIdeas", { title: nextAnniversary.title })}</strong>
               <div className="anniversary-idea-row">
-                <button onClick={onPlanDate}>订一个约会</button>
-                <button onClick={onWriteWish}>写一份专属心愿</button>
-                <button onClick={paired ? onAddMemory : onPair}>上传一张照片</button>
+                <button onClick={onPlanDate}>{t("memories.ideaDate")}</button>
+                <button onClick={onWriteWish}>{t("memories.ideaWish")}</button>
+                <button onClick={paired ? onAddMemory : onPair}>{t("memories.ideaPhoto")}</button>
               </div>
             </div>
           )}
           <div className="anniversary-list">
             {sortedAnniversaries.map((item) => (
-              <button type="button" key={item.id} onClick={() => onEditAnniversary(item)} aria-label={`编辑纪念日 ${item.title}`}>
+              <button type="button" key={item.id} onClick={() => onEditAnniversary(item)} aria-label={t("memories.editAnnivAria", { title: item.title })}>
                 <span className="anniversary-count">
-                  {isPast(item) ? <small>已过</small> : <><strong>{daysUntilAnniversary(item.eventDate, item.repeatsYearly)}</strong><small>天</small></>}
+                  {isPast(item) ? <small>{t("memories.past")}</small> : <><strong>{daysUntilAnniversary(item.eventDate, item.repeatsYearly)}</strong><small>{t("memories.dayUnit", { days: daysUntilAnniversary(item.eventDate, item.repeatsYearly) })}</small></>}
                 </span>
                 <span className="anniversary-info">
                   <strong>{item.title}</strong>
-                  <small>{item.eventDate} · {item.repeatsYearly ? "每年重复" : "仅这一次"} · 提前 {item.reminderDays} 天提醒</small>
+                  <small>{t("memories.annivMeta", { date: item.eventDate, repeat: item.repeatsYearly ? t("anniv.yearly") : t("anniv.once"), days: item.reminderDays })}</small>
                 </span>
                 <span className="anniversary-edit"><Pencil1Icon /></span>
               </button>
@@ -206,21 +221,21 @@ export function MemoriesScreen({
           </div>
         </>
       ) : (
-        <button className="memory-empty" onClick={onAddAnniversary}><CalendarIcon /><strong>添加第一个纪念日</strong><span>生日、第一次见面、领证日都可以</span></button>
+        <button className="memory-empty" onClick={onAddAnniversary}><CalendarIcon /><strong>{t("memories.firstAnniv")}</strong><span>{t("memories.firstAnnivHint")}</span></button>
       )}
-      <div className="memory-section-heading"><div><small>完成的心愿自动留在这里</small><h3>我们的时间线</h3></div></div>
+      <div className="memory-section-heading"><div><small>{t("memories.timelineTag")}</small><h3>{t("memories.timelineTitle")}</h3></div></div>
       {ordered.length > 0 ? (
         <>
-          {months.map((month) => (
-            <section key={month.key} className="timeline-month">
-              <h4>{formatMonthKey(month.key)}<span>{month.orders.length}</span></h4>
+          {months.map((entry) => (
+            <section key={entry.key} className="timeline-month">
+              <h4>{formatMonthKey(entry.key, undefined, lang)}<span>{entry.orders.length}</span></h4>
               <ol className="memory-timeline">
-                {month.orders.map((order) => (
+                {entry.orders.map((order) => (
                   <li key={order.id}>
                     <span className="timeline-art"><MenuArt item={order} /></span>
                     <div>
-                      <small>{dayKeyOf(order.completedAt ?? order.createdAt) ?? ""} · {order.to} 完成了 {order.from} 点的</small>
-                      <strong>{order.itemName}</strong>
+                      <small>{t("memories.timelineLine", { date: dayKeyOf(order.completedAt ?? order.createdAt) ?? "", to: order.to, from: order.from })}</small>
+                      <strong>{localizedItemName(order, lang)}</strong>
                       {order.note && <p>“{order.note}”</p>}
                     </div>
                   </li>
@@ -230,12 +245,12 @@ export function MemoriesScreen({
           ))}
           {remaining > 0 && (
             <button className="timeline-more" onClick={() => setTimelineLimit((current) => current + TIMELINE_PAGE)}>
-              还有 {remaining} 件，继续往前看
+              {t("memories.timelineMore", { count: remaining })}
             </button>
           )}
         </>
       ) : (
-        <div className="memory-card"><div><span className="memory-dot" /><p>还没有开始</p></div><h3>一份认真回应，就是最好的偏爱。</h3><p>完成一个心愿，它就会自己出现在这条时间线上。</p></div>
+        <div className="memory-card"><div><span className="memory-dot" /><p>{t("memories.notStarted")}</p></div><h3>{t("memories.emptyTitle")}</h3><p>{t("memories.emptyBody")}</p></div>
       )}
     </section>
   );

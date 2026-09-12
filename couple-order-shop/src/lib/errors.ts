@@ -1,50 +1,57 @@
-export function authErrorMessage(message: string): string {
+import type { TKey } from "./i18n.ts";
+
+/**
+ * Server messages are matched here and answered with a translation key rather
+ * than finished copy: the caller knows which language this phone is reading in,
+ * and this file must not have to.
+ */
+export function authErrorMessage(message: string): TKey {
   const lower = message.toLowerCase();
-  if (lower.includes("invalid login credentials")) return "邮箱或密码不正确";
-  if (lower.includes("already registered") || lower.includes("already been registered")) return "这个邮箱已经注册过了";
-  if (lower.includes("password")) return "密码至少需要 6 位";
-  if (lower.includes("rate limit")) return "操作太频繁，请稍后再试";
-  if (lower.includes("phone provider")) return "手机号登录尚未配置短信服务";
-  if (lower.includes("provider is not enabled")) return "该登录方式尚未配置";
-  return "操作失败，请稍后再试";
+  if (lower.includes("invalid login credentials")) return "err.auth.credentials";
+  if (lower.includes("already registered") || lower.includes("already been registered")) return "err.auth.registered";
+  if (lower.includes("password")) return "err.auth.password";
+  if (lower.includes("rate limit")) return "err.auth.rateLimit";
+  if (lower.includes("phone provider")) return "err.auth.smsMissing";
+  if (lower.includes("provider is not enabled")) return "err.auth.providerOff";
+  return "err.generic";
 }
 
 /** Maps the exceptions raised by `place_couple_order` to shop copy. */
-export function orderErrorMessage(message: string): string {
+export function orderErrorMessage(message: string): TKey {
   const lower = message.toLowerCase();
-  if (lower.includes("insufficient balance")) return "甜心币不够啦";
-  if (lower.includes("limited item already used")) return "这张限定券已经用过了";
-  if (lower.includes("rate limit")) return "点得太快啦，休息一下再点";
-  if (lower.includes("not paired")) return "还没有连接双人小铺";
-  if (lower.includes("invalid item")) return "这个心愿暂时下架了";
-  return "下单失败，请稍后再试";
+  if (lower.includes("insufficient balance")) return "err.order.balance";
+  if (lower.includes("limited item already used")) return "err.order.limitedUsed";
+  if (lower.includes("rate limit")) return "err.order.rateLimit";
+  if (lower.includes("not paired")) return "err.order.notPaired";
+  if (lower.includes("invalid item")) return "err.order.invalidItem";
+  return "err.order.failed";
 }
 
 /** Maps the exceptions raised by `update_order_status` to order-list copy. */
-export function orderStatusErrorMessage(message: string): string {
+export function orderStatusErrorMessage(message: string): TKey {
   const lower = message.toLowerCase();
-  if (lower.includes("not the recipient")) return "只有收到订单的一方可以接单或婉拒";
-  if (lower.includes("invalid transition")) return "订单状态已变化，请刷新后再试";
-  if (lower.includes("rate limit")) return "操作太频繁，请稍后再试";
-  return "订单更新失败，请稍后再试";
+  if (lower.includes("not the recipient")) return "err.status.notRecipient";
+  if (lower.includes("invalid transition")) return "err.status.invalidTransition";
+  if (lower.includes("rate limit")) return "err.auth.rateLimit";
+  return "err.status.failed";
 }
 
 /** Maps the exceptions raised by `claim_couple_task` / `daily_checkin`. */
-export function rewardErrorMessage(message: string, duplicateCopy: string): string {
+export function rewardErrorMessage(message: string, duplicateKey: TKey): TKey {
   const lower = message.toLowerCase();
-  if (lower.includes("duplicate") || lower.includes("unique")) return duplicateCopy;
-  if (lower.includes("requirement not met: photo")) return "先去「回忆」上传一张本周的照片再来领";
-  if (lower.includes("requirement not met: date-done")) return "先完成一份对方点的「去约会」心愿再来领";
-  if (lower.includes("requirement not met")) return "先完成一份对方点的心愿再来领";
-  if (lower.includes("rate limit")) return "操作太频繁，请稍后再试";
-  if (lower.includes("not paired")) return "还没有连接双人小铺";
-  return "操作失败，请稍后再试";
+  if (lower.includes("duplicate") || lower.includes("unique")) return duplicateKey;
+  if (lower.includes("requirement not met: photo")) return "err.reward.photo";
+  if (lower.includes("requirement not met: date-done")) return "err.reward.dateDone";
+  if (lower.includes("requirement not met")) return "err.reward.orderDone";
+  if (lower.includes("rate limit")) return "err.auth.rateLimit";
+  if (lower.includes("not paired")) return "err.order.notPaired";
+  return "err.generic";
 }
 
 /** Maps the exceptions raised when saving a couple's own wish. */
-export function wishErrorMessage(message: string): string {
+export function wishErrorMessage(message: string): TKey {
   const lower = message.toLowerCase();
-  if (lower.includes("custom wish limit reached")) return "自己写的心愿最多 30 个，先下架一个再加";
-  if (lower.includes("check constraint") || lower.includes("violates check")) return "名字、描述或价格超出了允许的范围";
-  return "保存失败，请稍后再试";
+  if (lower.includes("custom wish limit reached")) return "err.wish.limit";
+  if (lower.includes("check constraint") || lower.includes("violates check")) return "err.wish.constraint";
+  return "err.wish.failed";
 }

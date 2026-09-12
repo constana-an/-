@@ -1,0 +1,88 @@
+import { expect, test } from "@playwright/test";
+
+/**
+ * The shop reads in Chinese or English, per device.
+ *
+ * Two things are worth holding still here: that the switch reaches every
+ * screen, and that it stops at the couple's own words. A shop that translated
+ * "陪我去菜市场" into something else would be rewriting what one of them wrote.
+ */
+const fresh = async (page: import("@playwright/test").Page) => {
+  await page.goto("/");
+  await page.evaluate(() => {
+    localStorage.clear();
+    localStorage.setItem("couple-shop-onboarded", "1");
+    localStorage.setItem("couple-shop-economy-version", "4");
+    localStorage.setItem("couple-shop-coins:大宝", "200");
+  });
+  await page.reload();
+};
+
+test("a new device opens in Chinese and switches from the very first screen", async ({ page }) => {
+  await fresh(page);
+
+  // Nothing is guessed from the browser's locale: the shop is Chinese until
+  // somebody says otherwise.
+  await expect(page.getByRole("heading", { name: "今天是谁来点单？" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+
+  await page.getByRole("button", { name: "English", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Who's ordering today?" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en-US");
+
+  // The choice belongs to the device, so it has to survive a cold launch.
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Who's ordering today?" })).toBeVisible();
+});
+
+test("the switch reaches every screen, and the 我们 row turns it back", async ({ page }) => {
+  await fresh(page);
+  await page.getByRole("button", { name: "English", exact: true }).click();
+  await page.getByRole("button", { name: /I'm 大宝/ }).click();
+
+  await expect(page.getByRole("heading", { name: "Food" })).toBeVisible();
+  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "My tasks today" })).toBeVisible();
+  await page.getByRole("button", { name: "Orders", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Our orders" })).toBeVisible();
+  await page.getByRole("button", { name: "Memories", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Photo memories" })).toBeVisible();
+  await page.getByRole("button", { name: "Us", exact: true }).click();
+  await expect(page.getByRole("button", { name: /Shop settings/ })).toBeVisible();
+
+  // The row names where the tap leads, not where you already are.
+  await page.getByRole("button", { name: /语言 \/ Language/ }).click();
+  await expect(page.getByRole("button", { name: /小铺设置/ })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+});
+
+test("English counts agree with their nouns", async ({ page }) => {
+  await fresh(page);
+  await page.getByRole("button", { name: "English", exact: true }).click();
+  await page.getByRole("button", { name: /I'm 大宝/ }).click();
+  await page.getByRole("button", { name: "Memories", exact: true }).click();
+
+  // One wish away from the first milestone: "1 wishes to go" is the whole
+  // reason the dictionary carries a plural form at all.
+  await expect(page.getByText(/1 wish to go until/)).toBeVisible();
+  await expect(page.getByText(/1 wishes to go/)).toHaveCount(0);
+});
+
+test("a wish the couple wrote keeps their own words in both languages", async ({ page }) => {
+  await fresh(page);
+  await page.getByRole("button", { name: /我是大宝/ }).click();
+  await page.getByRole("button", { name: /写一个我们自己的心愿/ }).click();
+  await page.getByLabel("心愿名字").fill("陪我去菜市场");
+  await page.getByLabel("一句话介绍").fill("挑晚饭的菜，顺便牵手");
+  await page.getByRole("button", { name: "上架这个心愿", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "陪我去菜市场" })).toBeVisible();
+
+  await page.getByRole("button", { name: "我们", exact: true }).click();
+  await page.getByRole("button", { name: /语言 \/ Language/ }).click();
+  await page.getByRole("button", { name: "Shop", exact: true }).click();
+
+  // The shop's own items are renamed; theirs is not.
+  await expect(page.getByRole("heading", { name: "Fruit Tea, Full Cup" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "陪我去菜市场" })).toBeVisible();
+  await expect(page.getByText("挑晚饭的菜，顺便牵手")).toBeVisible();
+});

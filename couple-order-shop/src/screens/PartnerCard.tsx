@@ -1,5 +1,6 @@
 import { CheckCircledIcon, MoonIcon, SunIcon } from "@radix-ui/react-icons";
 import { WEEKLY_PERSONAL_GOAL } from "../lib/catalog";
+import { useI18n } from "../i18n";
 import type { PartnerStatus } from "../lib/types";
 
 /**
@@ -12,28 +13,29 @@ import type { PartnerStatus } from "../lib/types";
  * this renders does not return one.
  */
 export function PartnerCard({ status }: { status: PartnerStatus | null }) {
+  const { t } = useI18n();
   if (!status) return null;
   const progress = Math.min(100, Math.round((status.earnedThisWeek / WEEKLY_PERSONAL_GOAL) * 100));
   return (
-    <section className="partner-card" aria-label={`${status.displayName}的本周进度`}>
+    <section className="partner-card" aria-label={t("partner.aria", { name: status.displayName })}>
       <div className="partner-head">
         <span className="partner-avatar">{status.displayName.slice(0, 1)}</span>
         <div>
-          <strong>{status.displayName}这周</strong>
+          <strong>{t("partner.thisWeek", { name: status.displayName })}</strong>
           <small>
-            {status.checkedToday ? "今天已经来过小铺了" : "今天还没来签到"}
-            {status.streak > 0 && ` · 连续 ${status.streak} 天`}
+            {status.checkedToday ? t("partner.visited") : t("partner.notVisited")}
+            {status.streak > 0 && t("partner.streak", { days: status.streak })}
           </small>
         </div>
         <span className={`partner-today ${status.checkedToday ? "is-on" : ""}`}>
           {status.checkedToday ? <SunIcon /> : <MoonIcon />}
         </span>
       </div>
-      <div className="partner-progress" aria-label={`${status.displayName}本周进度 ${progress}%`}>
+      <div className="partner-progress" aria-label={t("partner.progressAria", { name: status.displayName, percent: progress })}>
         <span style={{ width: `${progress}%` }} />
       </div>
       <div className="partner-foot">
-        <span><CheckCircledIcon /> 本周攒了 {status.earnedThisWeek} 甜心币</span>
+        <span><CheckCircledIcon /> {t("partner.earned", { coins: status.earnedThisWeek })}</span>
         <span>{status.earnedThisWeek} / {WEEKLY_PERSONAL_GOAL}</span>
       </div>
     </section>

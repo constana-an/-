@@ -21,10 +21,13 @@ import {
   TrashIcon,
 } from "@radix-ui/react-icons";
 import { BottomSheet, KeyboardInput, MobileScroll, useKeyboard, useKeyboardInsets } from "./shell";
-import { DESIRED_TIMES, MENU, WISH_TEMPLATES, categoryMeta, earnedInWeek, reachedMilestones, statusText, taskClaimKey } from "./lib/catalog";
+import { STATUS_TEXT, categoryMeta, desiredTimes, earnedInWeek, localizeDesiredTime, localizedCategory, localizedItem, localizedItemName, localizedMilestone, localizedTemplate, MENU, reachedMilestones, WISH_TEMPLATES, taskClaimKey } from "./lib/catalog";
 import { dayKeyOf, formatStartedOn, isValidDateKey, normalizeDateInput, relationshipDays, todayKey } from "./lib/date";
 import { checkinStatusFrom, checkinStreak, dueAnniversaries } from "./lib/date";
 import { authErrorMessage, orderErrorMessage, orderStatusErrorMessage, rewardErrorMessage, wishErrorMessage } from "./lib/errors";
+import { LanguageProvider, useI18n } from "./i18n";
+import { LANGS, LANG_LABEL } from "./lib/i18n";
+import type { TKey } from "./lib/i18n";
 import { appleAuthEnabled, cloudEnabled, getSupabase, phoneAuthEnabled, type SupabaseClient } from "./lib/supabase";
 import {
   CHECKIN_REWARD,
@@ -185,27 +188,30 @@ async function dropSubscription(client: SupabaseClient | null) {
  * anonymous upgrade ended up calling itself 升级账户 on the tab, 创建正式账户 in
  * the title and 保护现有数据 on the button — and how 找回账户 kept a subtitle
  * about not relying on anonymous accounts.
+ *
+ * It hands back keys rather than sentences, so the same table answers for both
+ * languages.
  */
-function authSheetCopy(mode: AuthMode, upgrading: boolean, otpSent: boolean) {
+function authSheetCopy(mode: AuthMode, upgrading: boolean, otpSent: boolean): { title: TKey; description: TKey; primary: TKey } {
   switch (mode) {
     case "recover":
-      return { title: "找回账户", description: "输入注册邮箱，我们发一封重置邮件给你", primary: "发送重置邮件" };
+      return { title: "auth.recoverTitle", description: "auth.recoverDesc", primary: "auth.recoverPrimary" };
     case "new-password":
-      return { title: "设置新密码", description: "设好之后用新密码登录即可", primary: "保存新密码" };
+      return { title: "auth.newPasswordTitle", description: "auth.newPasswordDesc", primary: "auth.newPasswordPrimary" };
     case "phone":
       return {
-        title: "手机号登录",
-        description: otpSent ? "验证码已发送，填进来就能登录" : "收到短信验证码后即可登录",
-        primary: otpSent ? "验证并登录" : "发送验证码",
+        title: "auth.phoneTitle",
+        description: otpSent ? "auth.phoneDescSent" : "auth.phoneDesc",
+        primary: otpSent ? "auth.phonePrimarySent" : "auth.phonePrimary",
       };
     case "signup":
       return upgrading
-        ? { title: "升级账户", description: "现在的订单、任务和回忆都会保留，换手机也能登录回来", primary: "升级并保留数据" }
-        : { title: "注册账户", description: "注册后换手机登录即可回到这间小铺", primary: "注册账户" };
+        ? { title: "auth.upgradeTitle", description: "auth.upgradeDesc", primary: "auth.upgradePrimary" }
+        : { title: "auth.signupTitle", description: "auth.signupDesc", primary: "auth.signupPrimary" };
     default:
       // Not just "登录": the tab above it already says that, and two controls
       // with the same word is the kind of thing this table exists to prevent.
-      return { title: "登录账户", description: "用注册过的邮箱登录，回到你们的小铺", primary: "登录并进入小铺" };
+      return { title: "auth.signinTitle", description: "auth.signinDesc", primary: "auth.signinPrimary" };
   }
 }
 
@@ -225,7 +231,21 @@ function readDeepLink(): { view: MainView | null; orderId: string | null } {
   return { view: orderId ? "orders" : view, orderId };
 }
 
+/**
+ * The language provider wraps the whole shop here rather than in `App.tsx`,
+ * which is a protected runtime file. Everything below it — screens, sheets,
+ * toasts — reads the switch through `useI18n`.
+ */
 export default function Prototype() {
+  return (
+    <LanguageProvider>
+      <CoupleShop />
+    </LanguageProvider>
+  );
+}
+
+function CoupleShop() {
+  const { lang, setLang, t } = useI18n();
   const keyboard = useKeyboard();
   // Fixed bottom chrome has to ride the keyboard, per the runtime contract:
   // pinned to the safe area alone it sits *behind* the keyboard, which left the
@@ -257,7 +277,7 @@ export default function Prototype() {
   const [editingWishId, setEditingWishId] = useState<string | null>(null);
   const [selected, setSelected] = useState<MenuItem | null>(null);
   const [note, setNote] = useState("");
-  const [time, setTime] = useState<string>(DESIRED_TIMES[0]);
+  const [time, setTime] = useState<string>(() => desiredTimes(lang)[0]);
   const [focusOrderId, setFocusOrderId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // `subscribed` means this device really can be pushed to: a browser
@@ -318,7 +338,7 @@ export default function Prototype() {
   const [openingDismissed, setOpeningDismissed] = useState(
     () => localStorage.getItem(STORAGE_KEYS.openingDismissed) === "1",
   );
-  const [membership, setMembership] = useState<MembershipState>({ planName: "基础版", status: "active" });
+  const [membership, setMembership] = useState<MembershipState>({ planName: null, status: "active" });
   const toastTimer = useRef<number | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const broadcastChannel = useRef<BroadcastChannel | null>(null);
@@ -415,8 +435,8 @@ export default function Prototype() {
 
   useEffect(() => {
     const pending = getSupabase();
-    if (pending) pending.then(setSupabase).catch(() => showToast("云服务加载失败，已切换到本地模式"));
-  }, [showToast]);
+    if (pending) pending.then(setSupabase).catch(() => showToast(t("toast.cloudLoadFailed")));
+  }, [showToast, t]);
 
   /** Invokes the push function and reports what actually happened, or null. */
   const notifyPartner = useCallback(async (client: SupabaseClient, orderId: string, event: string) => {
@@ -512,8 +532,8 @@ export default function Prototype() {
     // Several can land at once on a first run; the newest is the one to show.
     const newest = fresh[fresh.length - 1];
     localStorage.setItem(milestonesKey(identity), JSON.stringify([...celebrated, ...fresh.map((item) => item.id)]));
-    showToast(`🎉 ${newest.title}`);
-  }, [identity, profile.startedOn, orders, checkin.streak, wallet.checkins, cloudCoupleId, showToast]);
+    showToast(t("toast.milestone", { title: localizedMilestone(newest, lang).title }));
+  }, [identity, profile.startedOn, orders, checkin.streak, wallet.checkins, cloudCoupleId, showToast, t, lang]);
 
   /**
    * The keyboard covers about 40% of the screen, including the bottom
@@ -877,7 +897,7 @@ export default function Prototype() {
         .maybeSingle();
       if (active && membershipRow) {
         const plan = membershipRow.membership_plans as unknown as { name?: string } | null;
-        setMembership({ planName: plan?.name ?? "基础版", status: membershipRow.status });
+        setMembership({ planName: plan?.name ?? null, status: membershipRow.status });
       }
     };
     void loadAll();
@@ -946,17 +966,19 @@ export default function Prototype() {
       .filter((entry) => !localStorage.getItem(remindedKey(entry.item.id, today)));
     if (pending.length === 0) return;
     const describe = (entry: { item: Anniversary; days: number }) =>
-      (entry.days === 0 ? `今天是「${entry.item.title}」` : `「${entry.item.title}」还有 ${entry.days} 天`);
+      (entry.days === 0
+        ? t("reminder.today", { title: entry.item.title })
+        : t("reminder.inDays", { title: entry.item.title, days: entry.days }));
     const timer = window.setTimeout(() => {
-      const headline = pending.slice(0, 2).map(describe).join("；");
-      showToast(pending.length > 2 ? `${headline}，等 ${pending.length} 个纪念日` : headline);
+      const headline = pending.slice(0, 2).map(describe).join(lang === "zh" ? "；" : "; ");
+      showToast(pending.length > 2 ? t("reminder.more", { headline, count: pending.length }) : headline);
       for (const entry of pending) {
         // Marked only once the reminder has actually gone out: writing the key
         // up front meant any re-render inside the delay ate it for the day.
         localStorage.setItem(remindedKey(entry.item.id, today), "1");
         if (notificationsSupported && Notification.permission === "granted" && "serviceWorker" in navigator) {
           void navigator.serviceWorker.getRegistration()
-            .then((registration) => registration?.showNotification("纪念日提醒 💕", {
+            .then((registration) => registration?.showNotification(t("notif.anniversaryTitle"), {
               body: describe(entry),
               icon: "/assets/app-icon.png",
               tag: `anniversary:${entry.item.id}`,
@@ -966,7 +988,7 @@ export default function Prototype() {
       }
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [dueSignature, showToast]);
+  }, [dueSignature, showToast, t, lang]);
 
   const clearCloudLocalState = () => {
     localStorage.removeItem(STORAGE_KEYS.cloudId);
@@ -991,7 +1013,7 @@ export default function Prototype() {
 
   const submitAuth = async () => {
     const client = await getSupabase();
-    if (!client) return showToast("云服务尚未配置");
+    if (!client) return showToast(t("toast.cloudNotConfigured"));
     setAuthBusy(true);
     try {
       if (authMode === "recover") {
@@ -999,7 +1021,7 @@ export default function Prototype() {
         const { error } = await client.auth.resetPasswordForEmail(authEmail.trim(), { redirectTo: window.location.origin });
         if (error) throw error;
         closeAuth();
-        showToast("如果邮箱已注册，重置邮件会很快送达");
+        showToast(t("toast.resetSent"));
         return;
       }
       if (authMode === "new-password") {
@@ -1008,47 +1030,47 @@ export default function Prototype() {
         if (error) throw error;
         setAuthPassword("");
         closeAuth();
-        showToast("新密码已保存");
+        showToast(t("toast.passwordSaved"));
         return;
       }
       if (authMode === "phone") {
         if (!phoneOtpSent) {
           const phone = authPhone.replace(/[\s-]/g, "");
-          if (!/^\+\d{7,15}$/.test(phone)) return showToast("请输入含国家区号的手机号，例如 +86138…");
+          if (!/^\+\d{7,15}$/.test(phone)) return showToast(t("toast.phoneFormat"));
           const { error } = await client.auth.signInWithOtp({ phone });
           if (error) throw error;
           setPhoneOtpSent(true);
-          showToast("验证码已发送");
+          showToast(t("toast.otpSent"));
         } else {
           const { error } = await client.auth.verifyOtp({ phone: authPhone.replace(/[\s-]/g, ""), token: authOtp.trim(), type: "sms" });
           if (error) throw error;
           closeAuth();
-          showToast("手机号登录成功");
+          showToast(t("toast.phoneSignedIn"));
         }
         return;
       }
-      if (!/^\S+@\S+\.\S+$/.test(authEmail.trim())) return showToast("请输入正确的邮箱地址");
-      if (authPassword.length < 6) return showToast("密码至少需要 6 位");
+      if (!/^\S+@\S+\.\S+$/.test(authEmail.trim())) return showToast(t("toast.emailInvalid"));
+      if (authPassword.length < 6) return showToast(t("toast.passwordShort"));
       if (authMode === "signup") {
-        if (!privacyAccepted) return showToast("请先同意隐私协议与用户协议");
+        if (!privacyAccepted) return showToast(t("toast.acceptPrivacy"));
         if (authUser?.is_anonymous) {
           const { error } = await client.auth.updateUser({ email: authEmail.trim(), password: authPassword });
           if (error) throw error;
-          showToast("升级申请已提交，请去邮箱完成验证");
+          showToast(t("toast.upgradeSubmitted"));
         } else {
           const { data, error } = await client.auth.signUp({ email: authEmail.trim(), password: authPassword, options: { emailRedirectTo: window.location.origin } });
           if (error) throw error;
-          showToast(data.session ? "注册成功" : "注册成功，请去邮箱完成验证");
+          showToast(t(data.session ? "toast.signupDone" : "toast.signupVerify"));
         }
       } else {
         const { error } = await client.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
         if (error) throw error;
-        showToast("登录成功，正在恢复双人小铺");
+        showToast(t("toast.signinDone"));
       }
       setAuthPassword("");
       closeAuth();
     } catch (error) {
-      showToast(authErrorMessage(error instanceof Error ? error.message : "unknown"));
+      showToast(t(authErrorMessage(error instanceof Error ? error.message : "unknown")));
     } finally {
       setAuthBusy(false);
     }
@@ -1058,7 +1080,7 @@ export default function Prototype() {
     const client = await getSupabase();
     if (!client) return;
     const { error } = await client.auth.signInWithOAuth({ provider: "apple", options: { redirectTo: window.location.origin } });
-    if (error) showToast(authErrorMessage(error.message));
+    if (error) showToast(t(authErrorMessage(error.message)));
   };
 
   const signOut = async () => {
@@ -1070,7 +1092,7 @@ export default function Prototype() {
     await client.auth.signOut();
     clearCloudLocalState();
     closeAuth();
-    showToast("已安全退出，这台手机的同步缓存已清理");
+    showToast(t("toast.signedOut"));
   };
 
   const exportData = async () => {
@@ -1120,9 +1142,9 @@ export default function Prototype() {
           auditLog: auditData.data,
         };
       }
-      const file = new File([JSON.stringify(payload, null, 2)], `情侣小铺数据-${todayKey()}.json`, { type: "application/json" });
+      const file = new File([JSON.stringify(payload, null, 2)], `${t("export.fileName")}-${todayKey()}.json`, { type: "application/json" });
       const shareNavigator = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
-      if (navigator.share && shareNavigator.canShare?.({ files: [file] })) await navigator.share({ title: "情侣小铺数据导出", files: [file] });
+      if (navigator.share && shareNavigator.canShare?.({ files: [file] })) await navigator.share({ title: t("export.shareTitle"), files: [file] });
       else {
         const url = URL.createObjectURL(file);
         const link = document.createElement("a");
@@ -1131,9 +1153,9 @@ export default function Prototype() {
         link.click();
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
-      showToast("数据已导出（照片只含引用路径）");
+      showToast(t("toast.exported"));
     } catch {
-      showToast("导出失败，请稍后再试");
+      showToast(t("toast.exportFailed"));
     }
   };
 
@@ -1149,18 +1171,18 @@ export default function Prototype() {
         const { error } = await client.rpc("leave_couple_space");
         if (error) throw error;
         clearCloudLocalState();
-        showToast("已解除配对，可以创建或加入新的小铺");
+        showToast(t("toast.unpaired"));
       } else {
         const { error } = await client.rpc("delete_my_account");
         if (error) throw error;
         clearCloudLocalState();
         setAuthUser(null);
-        showToast("账户与个人数据已注销");
+        showToast(t("toast.accountDeleted"));
       }
       setDangerConfirm(null);
       setPrivacyOpen(false);
     } catch {
-      showToast("操作失败，请稍后再试");
+      showToast(t("toast.actionFailed"));
     } finally {
       setCloudBusy(false);
     }
@@ -1172,23 +1194,23 @@ export default function Prototype() {
     if (!cloudCoupleId) {
       if (!identity) return;
       const today = todayKey();
-      if (wallet.checkins.includes(today)) return showToast("今天已经签过到啦");
+      if (wallet.checkins.includes(today)) return showToast(t("toast.alreadyCheckedIn"));
       const days = [today, ...wallet.checkins];
       setWallet((current) => (current.owner === identity
         ? { ...current, coins: current.coins + CHECKIN_REWARD, checkins: days }
         : current));
-      return showToast(`连续签到 ${checkinStreak(days)} 天，甜心币 +${CHECKIN_REWARD}`);
+      return showToast(t("toast.checkinDone", { streak: checkinStreak(days), reward: CHECKIN_REWARD }));
     }
     const client = await getSupabase();
     // cloudCoupleId is read from localStorage synchronously while the session is
     // still being restored, so authUser can legitimately be null for a moment.
-    if (!client || !authUser) return showToast("正在恢复登录状态，请稍后再试");
+    if (!client || !authUser) return showToast(t("toast.restoringSession"));
     const { data, error } = await client.rpc("daily_checkin").single();
-    if (error) return showToast(rewardErrorMessage(error.message, "今天已经签过到啦"));
+    if (error) return showToast(t(rewardErrorMessage(error.message, "toast.alreadyCheckedIn")));
     const result = data as { coin_balance: number; streak: number; reward: number };
     setCoins(result.coin_balance);
     setCheckin({ streak: result.streak, checkedToday: true });
-    showToast(`连续签到 ${result.streak} 天，甜心币 +${result.reward}`);
+    showToast(t("toast.checkinDone", { streak: result.streak, reward: result.reward }));
   };
 
   const requirePairedForPhotos = (): boolean => {
@@ -1196,15 +1218,15 @@ export default function Prototype() {
     // the fix instead of at a login form that may not even be configured.
     setMemoryOpen(false);
     setView("ours");
-    showToast("照片回忆需要先连接双人小铺");
+    showToast(t("toast.photosNeedPairing"));
     return false;
   };
 
   const saveMemory = async () => {
     const client = cloudCoupleId ? await getSupabase() : null;
     if (!client || !cloudCoupleId || !authUser) return requirePairedForPhotos();
-    if (!memoryCaption.trim()) return showToast("写一句这张照片的故事吧");
-    if (!isValidDateKey(memoryDate) || memoryDate > todayKey()) return showToast("回忆日期不能晚于今天");
+    if (!memoryCaption.trim()) return showToast(t("toast.memoryCaptionRequired"));
+    if (!isValidDateKey(memoryDate) || memoryDate > todayKey()) return showToast(t("toast.memoryDateFuture"));
     if (editingMemoryId) {
       const caption = memoryCaption.trim();
       setCloudBusy(true);
@@ -1216,13 +1238,13 @@ export default function Prototype() {
         .eq("id", editingMemoryId)
         .select("id");
       setCloudBusy(false);
-      if (error) return showToast("保存失败，请稍后再试");
-      if (!data?.length) return showToast("只能修改自己上传的回忆");
+      if (error) return showToast(t("toast.saveFailed"));
+      if (!data?.length) return showToast(t("toast.memoryEditOwn"));
       setMemories((current) => current.map((item) => (item.id === editingMemoryId ? { ...item, caption, happenedOn: memoryDate } : item)));
       closeMemory();
-      return showToast("回忆已更新");
+      return showToast(t("toast.memoryUpdated"));
     }
-    if (memoryFile && (memoryFile.size > 8 * 1024 * 1024 || !memoryFile.type.startsWith("image/"))) return showToast("请选择 8MB 以内的照片");
+    if (memoryFile && (memoryFile.size > 8 * 1024 * 1024 || !memoryFile.type.startsWith("image/"))) return showToast(t("toast.photoTooLarge"));
     setCloudBusy(true);
     let imagePath: string | undefined;
     try {
@@ -1241,10 +1263,10 @@ export default function Prototype() {
       setMemoryCaption("");
       setMemoryFile(null);
       closeMemory();
-      showToast("这份回忆已经收藏好啦");
+      showToast(t("toast.memorySaved"));
     } catch {
       if (imagePath) await client.storage.from("memory-photos").remove([imagePath]);
-      showToast("保存失败，请稍后再试");
+      showToast(t("toast.saveFailed"));
     } finally {
       setCloudBusy(false);
     }
@@ -1256,14 +1278,14 @@ export default function Prototype() {
     setCloudBusy(true);
     const { data, error } = await client.from("memory_entries").delete().eq("id", memory.id).select("id");
     setCloudBusy(false);
-    if (error) return showToast("删除失败，请稍后再试");
-    if (!data?.length) return showToast("只能删除自己上传的回忆");
+    if (error) return showToast(t("toast.deleteFailed"));
+    if (!data?.length) return showToast(t("toast.memoryDeleteOwn"));
     // The row is already gone, so a failed object removal must not read as a
     // failed delete; the orphaned file is cleaned up by storage retention.
     if (memory.imagePath) await client.storage.from("memory-photos").remove([memory.imagePath]);
     setMemories((current) => current.filter((item) => item.id !== memory.id));
     closeMemoryDetail();
-    showToast("这份回忆已删除");
+    showToast(t("toast.memoryDeleted"));
   };
 
   const anniversaryFields = () => ({
@@ -1275,9 +1297,9 @@ export default function Prototype() {
 
   const saveAnniversary = async () => {
     const title = anniversaryTitle.trim();
-    if (!title) return showToast("请填写纪念日名称");
-    if (!isValidDateKey(anniversaryDate)) return showToast("请填写正确日期");
-    if (cloudCoupleId && !authUser) return showToast("正在恢复登录状态，请稍后再试");
+    if (!title) return showToast(t("toast.annivTitleRequired"));
+    if (!isValidDateKey(anniversaryDate)) return showToast(t("toast.dateInvalid"));
+    if (cloudCoupleId && !authUser) return showToast(t("toast.restoringSession"));
     const entry: Anniversary = { id: editingAnniversaryId ?? newId(), title, eventDate: anniversaryDate, repeatsYearly: anniversaryRepeats, reminderDays: anniversaryReminder };
     const client = cloudCoupleId ? await getSupabase() : null;
     if (client && cloudCoupleId && authUser) {
@@ -1286,15 +1308,17 @@ export default function Prototype() {
         ? await client.from("anniversaries").update(anniversaryFields()).eq("id", editingAnniversaryId)
         : await client.from("anniversaries").insert({ id: entry.id, couple_id: cloudCoupleId, created_by: authUser.id, ...anniversaryFields() });
       setCloudBusy(false);
-      if (error) return showToast("保存失败，请稍后再试");
+      if (error) return showToast(t("toast.saveFailed"));
     }
     setAnniversaries((current) => (editingAnniversaryId
       ? current.map((item) => (item.id === entry.id ? entry : item))
       : [...current, entry]));
     const wasEditing = Boolean(editingAnniversaryId);
     closeAnniversary();
-    if (wasEditing) return showToast("纪念日已更新");
-    showToast(entry.reminderDays > 0 ? `纪念日已保存，将提前 ${entry.reminderDays} 天提醒` : "纪念日已保存，当天提醒");
+    if (wasEditing) return showToast(t("toast.annivUpdated"));
+    showToast(entry.reminderDays > 0
+      ? t("toast.annivSavedAhead", { days: entry.reminderDays })
+      : t("toast.annivSavedSameDay"));
   };
 
   const deleteAnniversary = async () => {
@@ -1305,11 +1329,11 @@ export default function Prototype() {
       setCloudBusy(true);
       const { error } = await client.from("anniversaries").delete().eq("id", id);
       setCloudBusy(false);
-      if (error) return showToast("删除失败，请稍后再试");
+      if (error) return showToast(t("toast.deleteFailed"));
     }
     setAnniversaries((current) => current.filter((item) => item.id !== id));
     closeAnniversary();
-    showToast("纪念日已删除");
+    showToast(t("toast.annivDeleted"));
   };
 
   const openAddWish = () => {
@@ -1328,11 +1352,11 @@ export default function Prototype() {
     const name = wishDraft.name.trim();
     const description = wishDraft.description.trim();
     const price = Number(wishDraft.price);
-    if (!name) return showToast("给这个心愿起个名字吧");
-    if (name.length > 20) return showToast("名字最多 20 个字");
-    if (description.length > 40) return showToast("一句话介绍最多 40 个字");
+    if (!name) return showToast(t("toast.wishNameRequired"));
+    if (name.length > 20) return showToast(t("toast.nameTooLong"));
+    if (description.length > 40) return showToast(t("toast.descTooLong"));
     if (!Number.isInteger(price) || price < CUSTOM_PRICE_RANGE.min || price > CUSTOM_PRICE_RANGE.max) {
-      return showToast(`价格请填 ${CUSTOM_PRICE_RANGE.min}–${CUSTOM_PRICE_RANGE.max} 之间的整数`);
+      return showToast(t("toast.priceRange", { min: CUSTOM_PRICE_RANGE.min, max: CUSTOM_PRICE_RANGE.max }));
     }
     const entry = customItemFrom({ id: editingWishId ?? newId(), category: wishDraft.category, name, description, price });
     const client = cloudCoupleId ? await getSupabase() : null;
@@ -1343,14 +1367,14 @@ export default function Prototype() {
         ? await client.from("custom_menu_items").update(fields).eq("id", editingWishId)
         : await client.from("custom_menu_items").insert({ id: entry.id, couple_id: cloudCoupleId, created_by: authUser.id, ...fields });
       setCloudBusy(false);
-      if (error) return showToast(wishErrorMessage(error.message));
+      if (error) return showToast(t(wishErrorMessage(error.message)));
     }
     setCustomItems((current) => (editingWishId
       ? current.map((item) => (item.id === entry.id ? entry : item))
       : [...current, entry]));
     setCategory(entry.category);
     closeWish();
-    showToast(editingWishId ? "心愿已更新" : `「${name}」已经上架你们的小铺`);
+    showToast(editingWishId ? t("toast.wishUpdated") : t("toast.wishListed", { name }));
   };
 
   const deleteWish = async () => {
@@ -1360,13 +1384,13 @@ export default function Prototype() {
       setCloudBusy(true);
       const { error } = await client.from("custom_menu_items").delete().eq("id", editingWishId);
       setCloudBusy(false);
-      if (error) return showToast("删除失败，请稍后再试");
+      if (error) return showToast(t("toast.deleteFailed"));
     }
     // Orders already placed keep their own name, price and category, so taking
     // a wish off the menu never rewrites what has already happened.
     setCustomItems((current) => current.filter((item) => item.id !== editingWishId));
     closeWish();
-    showToast("这个心愿已经下架");
+    showToast(t("toast.wishRemoved"));
   };
 
   const openSettings = () => {
@@ -1381,10 +1405,10 @@ export default function Prototype() {
       secondName: profileDraft.secondName.trim(),
       startedOn: profileDraft.startedOn.trim(),
     };
-    if (!nextProfile.shopName || !nextProfile.firstName || !nextProfile.secondName) return showToast("请把小铺和双方名字填写完整");
-    if ([nextProfile.shopName, nextProfile.firstName, nextProfile.secondName].some((value) => value.length > 20)) return showToast("名字最多 20 个字");
-    if (!isValidDateKey(nextProfile.startedOn)) return showToast("开始日期请按 YYYY-MM-DD 填写");
-    if (nextProfile.startedOn > todayKey()) return showToast("开始日期不能晚于今天");
+    if (!nextProfile.shopName || !nextProfile.firstName || !nextProfile.secondName) return showToast(t("toast.profileIncomplete"));
+    if ([nextProfile.shopName, nextProfile.firstName, nextProfile.secondName].some((value) => value.length > 20)) return showToast(t("toast.nameTooLong"));
+    if (!isValidDateKey(nextProfile.startedOn)) return showToast(t("toast.startedOnFormat"));
+    if (nextProfile.startedOn > todayKey()) return showToast(t("toast.startedOnFuture"));
 
     setProfileSaving(true);
     try {
@@ -1400,9 +1424,9 @@ export default function Prototype() {
       }
       setProfile(nextProfile);
       closeSettings();
-      showToast(cloudCoupleId ? "资料已保存并同步给另一半" : "小铺资料已保存");
+      showToast(t(cloudCoupleId ? "toast.profileSynced" : "toast.profileSaved"));
     } catch {
-      showToast("保存失败，请稍后再试");
+      showToast(t("toast.saveFailed"));
     } finally {
       setProfileSaving(false);
     }
@@ -1417,19 +1441,19 @@ export default function Prototype() {
     // Whichever category is open, not only 点吃的: the other three had no
     // randomiser at all, which is where choosing gets hardest.
     const pool = [...customItems, ...MENU].filter((item) => item.category === category && !usedLimitedIds.includes(item.id));
-    if (pool.length === 0) return showToast("这个分类已经没有可选的了");
+    if (pool.length === 0) return showToast(t("toast.categoryEmpty"));
     const item = pool[Math.floor(Math.random() * pool.length)];
     setSelected(item);
-    showToast(`今天就选「${item.name}」`);
+    showToast(t("toast.randomPick", { name: localizedItem(item, lang).name }));
   };
 
   const copyInviteCode = async () => {
     if (!inviteCode) return;
     try {
       await navigator.clipboard.writeText(inviteCode);
-      showToast(`情侣码 ${inviteCode} 已复制`);
+      showToast(t("toast.inviteCopied", { code: inviteCode }));
     } catch {
-      showToast(`情侣码是 ${inviteCode}`);
+      showToast(t("toast.inviteIs", { code: inviteCode }));
     }
   };
 
@@ -1463,30 +1487,30 @@ export default function Prototype() {
         p_from_name: order.from,
         p_to_name: order.to,
       }).single();
-      if (error) return showToast(orderErrorMessage(error.message));
+      if (error) return showToast(t(orderErrorMessage(error.message)));
       const result = data as { order_id: string; coin_balance: number };
       setCoins(result.coin_balance);
       setOrders((current) => [order, ...current.filter((item) => item.id !== order.id)]);
       closeOrderSheet();
       setNote("");
-      setTime(DESIRED_TIMES[0]);
+      setTime(desiredTimes(lang)[0]);
       // Say only what is true right now; upgrade the wording once the push has
       // actually been handed over. This used to claim delivery beforehand and
       // then discard the invoke's error entirely.
-      showToast("下单成功，已记在小铺里");
+      showToast(t("toast.orderPlaced"));
       const notice = await notifyPartner(client, order.id, "order.created");
-      if (notice && notice.delivered > 0) showToast(`下单成功，已提醒${partnerName}`);
-      else if (notice && notice.subscribed === 0) showToast(`${partnerName}还没开启通知，打开小铺时会看到`);
+      if (notice && notice.delivered > 0) showToast(t("toast.orderNotified", { partner: partnerName }));
+      else if (notice && notice.subscribed === 0) showToast(t("toast.orderNoPush", { partner: partnerName }));
       return;
     }
-    if (usedLimitedIds.includes(selected.id)) return showToast("这张限定券已经用过了");
-    if (coins < selected.price) return showToast("甜心币不够啦");
+    if (usedLimitedIds.includes(selected.id)) return showToast(t("toast.limitedUsed"));
+    if (coins < selected.price) return showToast(t("toast.notEnoughCoins"));
     setOrders((current) => [order, ...current]);
     setCoins((current) => current - selected.price);
     closeOrderSheet();
     setNote("");
-    setTime(DESIRED_TIMES[0]);
-    showToast("下单成功，已记在小铺里");
+    setTime(desiredTimes(lang)[0]);
+    showToast(t("toast.orderPlaced"));
   };
 
   /** Refunds the payer in local mode; the payer may be the other identity. */
@@ -1502,7 +1526,7 @@ export default function Prototype() {
     const client = cloudCoupleId ? await getSupabase() : null;
     if (client) {
       const { data, error } = await client.rpc("cancel_couple_order", { p_order_id: id }).single();
-      if (error) return showToast(orderStatusErrorMessage(error.message));
+      if (error) return showToast(t(orderStatusErrorMessage(error.message)));
       const result = data as { coin_balance: number } | null;
       if (typeof result?.coin_balance === "number") setCoins(result.coin_balance);
       void notifyPartner(client, id, "order.cancelled");
@@ -1510,7 +1534,7 @@ export default function Prototype() {
       refundLocally(target);
     }
     setOrders((current) => current.map((order) => (order.id === id ? { ...order, status: "cancelled" } : order)));
-    showToast(`已撤回，${target.price} 甜心币退回给你`);
+    showToast(t("toast.cancelled", { price: target.price }));
   };
 
   const updateStatus = async (id: string, status: OrderStatus, note?: string) => {
@@ -1518,7 +1542,7 @@ export default function Prototype() {
     const client = cloudCoupleId ? await getSupabase() : null;
     if (client) {
       const { data, error } = await client.rpc("update_order_status", { p_order_id: id, p_status: status, p_note: note ?? null }).single();
-      if (error) return showToast(orderStatusErrorMessage(error.message));
+      if (error) return showToast(t(orderStatusErrorMessage(error.message)));
       const result = data as { coin_balance: number } | null;
       if (typeof result?.coin_balance === "number") setCoins(result.coin_balance);
       // The sender is the one who needs to hear this; this device says nothing
@@ -1534,9 +1558,9 @@ export default function Prototype() {
     setOrders((current) => current.map((order) => (order.id === id
       ? { ...order, status, completedAt: completedAt ?? order.completedAt, declineNote: status === "rejected" ? note : order.declineNote }
       : order)));
-    if (status === "rejected") showToast(`已婉拒，${target?.price ?? 0} 甜心币退回给${target?.from ?? "对方"}`);
-    else if (status === "done") showToast("心愿完成，记得去任务中心领取奖励");
-    else showToast(`订单已更新为「${statusText[status]}」`);
+    if (status === "rejected") showToast(t("toast.declined", { price: target?.price ?? 0, name: target?.from ?? t("toast.partnerFallback") }));
+    else if (status === "done") showToast(t("toast.wishDone"));
+    else showToast(t("toast.orderStatusUpdated", { status: STATUS_TEXT[lang][status] }));
   };
 
   const claimTask = async (task: CoupleTask) => {
@@ -1545,30 +1569,33 @@ export default function Prototype() {
     const client = cloudCoupleId ? await getSupabase() : null;
     if (client) {
       const { data, error } = await client.rpc("claim_couple_task", { p_task_id: task.id }).single();
-      if (error) return showToast(rewardErrorMessage(error.message, "这个任务已经领取过啦"));
+      if (error) return showToast(t(rewardErrorMessage(error.message, "toast.taskAlreadyClaimed")));
       const result = data as { coin_balance: number; claim_key: string };
       setClaimedTasks((current) => [...current, `${result.claim_key}:${task.id}`]);
       setCoins(result.coin_balance);
-      showToast(`任务完成，甜心币 +${task.reward}`);
+      showToast(t("toast.taskClaimed", { reward: task.reward }));
       return;
     }
     setClaimedTasks((current) => [...current, key]);
     setCoins((current) => current + task.reward);
-    showToast(`任务完成，甜心币 +${task.reward}`);
+    showToast(t("toast.taskClaimed", { reward: task.reward }));
   };
 
   const enableNotifications = async () => {
-    if (!notificationsSupported) return showToast("当前浏览器不支持通知");
+    if (!notificationsSupported) return showToast(t("toast.notifUnsupported"));
     const permission = await Notification.requestPermission();
     setPushState((current) => ({ ...current, permission }));
-    if (permission !== "granted") return showToast("需要在 iPhone 设置中允许通知");
+    if (permission !== "granted") return showToast(t("toast.notifDenied"));
     // Everything below decides whether this device can actually be pushed to.
     // The old code promised push unconditionally, including when it had just
     // reported that the subscription failed.
     const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : undefined;
     const client = cloudCoupleId ? await getSupabase() : null;
-    if (!registration || !vapidPublicKey()) return showToast("通知已开启；这台设备只能在打开小铺时提醒你");
-    if (!client || !cloudCoupleId || !authUser) return showToast(`通知已开启；连接双人小铺后才能收到${partnerName}的提醒`);
+    if (!registration || !vapidPublicKey()) return showToast(t("toast.notifLocalOnly"));
+    // Reachable before an identity has been chosen, where there is no partner
+    // to name yet — the old template literal printed a literal "null" here.
+    const them = partnerName ?? t("toast.partnerFallback");
+    if (!client || !cloudCoupleId || !authUser) return showToast(t("toast.notifNeedPair", { partner: them }));
     try {
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
@@ -1576,11 +1603,11 @@ export default function Prototype() {
       });
       await saveSubscription(client, subscription, cloudCoupleId, authUser.id);
       setPushState({ permission, subscribed: true });
-      showToast(`已开启，${partnerName}下单或回应时会推送到这台手机`);
-      void registration.showNotification("点单小铺", { body: "以后有新订单和回应，我会马上告诉你。", icon: "/assets/app-icon.png" });
+      showToast(t("toast.notifOn", { partner: them }));
+      void registration.showNotification(t("notif.appName"), { body: t("notif.enabledBody"), icon: "/assets/app-icon.png" });
     } catch {
       setPushState({ permission, subscribed: false });
-      showToast("通知已开启，但推送订阅失败，稍后可重试");
+      showToast(t("toast.notifSubFailed"));
     }
   };
 
@@ -1590,7 +1617,7 @@ export default function Prototype() {
     if (!authUser || authUser.is_anonymous) {
       setAuthMode("signup");
       setAuthOpen(true);
-      return showToast("请先注册正式账户，换手机也能恢复");
+      return showToast(t("toast.needAccountCreate"));
     }
     setCloudBusy(true);
     try {
@@ -1607,9 +1634,9 @@ export default function Prototype() {
         p_partner_b_name: profile.secondName,
         p_started_on: profile.startedOn,
       });
-      showToast(`情侣码 ${row.invite_code} 已生成`);
+      showToast(t("toast.inviteCreated", { code: row.invite_code }));
     } catch {
-      showToast("创建失败，请检查免费云配置");
+      showToast(t("toast.createFailed"));
     } finally {
       setCloudBusy(false);
     }
@@ -1621,7 +1648,7 @@ export default function Prototype() {
     if (!authUser || authUser.is_anonymous) {
       setAuthMode("signup");
       setAuthOpen(true);
-      return showToast("请先登录正式账户，再加入双人小铺");
+      return showToast(t("toast.needAccountJoin"));
     }
     setCloudBusy(true);
     try {
@@ -1633,9 +1660,9 @@ export default function Prototype() {
       setCloudCoupleId(row.couple_id);
       setInviteCode(pairingCode);
       setPairingCode("");
-      showToast("配对成功，双人小铺已连接");
+      showToast(t("toast.paired"));
     } catch {
-      showToast("没有找到这个情侣码");
+      showToast(t("toast.inviteNotFound"));
     } finally {
       setCloudBusy(false);
     }
@@ -1645,19 +1672,37 @@ export default function Prototype() {
     return (
       <div className="app-shell identity-shell">
         <MobileScroll className="identity-screen">
-          <main className="identity-login" aria-label="选择登录身份">
-            <div className="identity-brand"><span><HeartFilledIcon /></span><strong>{profile.shopName}</strong></div>
-            <div className="identity-welcome"><span>{profile.firstName} & {profile.secondName}</span><h1>今天是谁来点单？</h1><p>两台 iPhone 分别选择自己的身份，订单就会自动发给对方。</p></div>
+          <main className="identity-login" aria-label={t("identity.aria")}>
+            <div className="identity-brand">
+              <span><HeartFilledIcon /></span>
+              <strong>{profile.shopName}</strong>
+              {/* This is the first screen anyone sees, so the switch has to be
+                  here too — otherwise an English reader has to guess their way
+                  through a Chinese identity choice to reach the setting. */}
+              <div className="identity-lang" role="group" aria-label={t("ours.language")}>
+                {LANGS.map((option) => (
+                  <button
+                    key={option}
+                    className={lang === option ? "is-active" : ""}
+                    aria-pressed={lang === option}
+                    onClick={() => setLang(option)}
+                  >
+                    {LANG_LABEL[option]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="identity-welcome"><span>{profile.firstName} & {profile.secondName}</span><h1>{t("identity.question")}</h1><p>{t("identity.hint")}</p></div>
             <div className="identity-options">
               {identityOptions.map((option) => (
                 <button key={option.name} className={`identity-choice ${option.tone}`} onClick={() => { chooseIdentity(option.name); setView("shop"); }}>
                   <span className="identity-avatar">{option.displayName.slice(0, 1)}</span>
-                  <span><strong>我是{option.displayName}</strong><small>今天由{option.displayName}来点单</small></span>
+                  <span><strong>{t("identity.iAm", { name: option.displayName })}</strong><small>{t("identity.todayBy", { name: option.displayName })}</small></span>
                   <span className="identity-arrow"><PaperPlaneIcon /></span>
                 </button>
               ))}
             </div>
-            <div className="identity-note"><CheckCircledIcon /><span>选择后，这台 iPhone 会自动记住你的身份</span></div>
+            <div className="identity-note"><CheckCircledIcon /><span>{t("identity.remembered")}</span></div>
           </main>
         </MobileScroll>
       </div>
@@ -1665,85 +1710,85 @@ export default function Prototype() {
   }
 
   const syncState = cloudCoupleId
-    ? { title: `与${partnerName}的小铺已连接`, detail: "新订单会实时送到对方手机", live: true }
+    ? { title: t("sync.connected", { partner: partnerName }), detail: t("sync.connectedDetail"), live: true }
     : cloudEnabled
-      ? { title: `还没有连接${partnerName}`, detail: "点这里创建小铺或输入情侣码", live: false }
-      : { title: "本地体验模式", detail: "订单只保存在这台 iPhone 上", live: false };
+      ? { title: t("sync.waiting", { partner: partnerName }), detail: t("sync.waitingDetail"), live: false }
+      : { title: t("sync.local"), detail: t("sync.localDetail"), live: false };
 
   // The cloud steps only exist for a build that has a project behind it; on a
   // local install the checklist is honestly two steps long.
   const openingSteps: OpeningStep[] = [
-    { id: "identity", title: `身份：${currentName}`, detail: "另一台 iPhone 选另一个身份", done: true },
+    { id: "identity", title: t("opening.identity", { name: currentName }), detail: t("opening.identityDetail"), done: true },
     ...(cloudEnabled ? [
       {
         id: "account",
-        title: "注册正式账户",
-        detail: "换手机后凭账户恢复你们的小铺",
+        title: t("opening.account"),
+        detail: t("opening.accountDetail"),
         done: Boolean(authUser && !authUser.is_anonymous),
         action: openAccount,
-        cta: "去注册账户",
+        cta: t("opening.accountCta"),
       },
       {
         id: "pair",
-        title: "创建或加入小铺",
-        detail: `和${partnerName}用同一个情侣码连接`,
+        title: t("opening.pair"),
+        detail: t("opening.pairDetail", { partner: partnerName }),
         done: Boolean(cloudCoupleId),
         action: () => setView("ours"),
-        cta: "去连接双人小铺",
+        cta: t("opening.pairCta"),
       },
       // Installing comes first because on iPhone it is what makes push exist
       // at all. Once installed the step drops off instead of sitting ticked.
       ...(installed ? [] : [{
         id: "install",
-        title: "添加到主屏幕",
-        detail: "Safari 分享菜单 →「添加到主屏幕」，之后才能收通知",
+        title: t("opening.install"),
+        detail: t("opening.installDetail"),
         done: false,
         action: () => setInstallHelpOpen(true),
-        cta: "怎么添加",
+        cta: t("opening.installCta"),
       }]),
       // A browser with no push service would leave this permanently unticked
       // and the checklist permanently on screen, so it is only offered where it
       // can actually be finished.
       ...(pushCapable() ? [{
         id: "push",
-        title: "开启消息通知",
-        detail: "对方下单或回应时收到提醒",
+        title: t("opening.push"),
+        detail: t("opening.pushDetail"),
         done: pushState.subscribed,
         action: enableNotifications,
-        cta: "去开启通知",
+        cta: t("opening.pushCta"),
       }] : []),
     ] : []),
     {
       id: "order",
-      title: "送出第一个心愿",
-      detail: `攒够甜心币，点一份给${partnerName}`,
+      title: t("opening.firstOrder"),
+      detail: t("opening.firstOrderDetail", { partner: partnerName }),
       done: orders.length > 0,
       action: () => setView("shop"),
-      cta: "去挑一个心愿",
+      cta: t("opening.firstOrderCta"),
     },
   ];
 
   return (
     <div className="app-shell">
       <MobileScroll className="app-screen" scrollKey={view}>
-        <main className="screen-content couple-shop" aria-label="情侣点单小铺" onPointerDown={dismissKeyboardOnOutsideTap}>
+        <main className="screen-content couple-shop" aria-label={t("app.aria")} onPointerDown={dismissKeyboardOnOutsideTap}>
           <header className="top-bar">
             <div className="brand-mark"><HeartFilledIcon /></div>
             <div className="brand-copy"><span>{profile.firstName} & {profile.secondName}</span><h1>{profile.shopName}</h1></div>
-            <button className="bell-button" onClick={() => setView("orders")} aria-label="查看订单"><BellIcon />{activeOrders > 0 && <span>{activeOrders}</span>}</button>
+            <button className="bell-button" onClick={() => setView("orders")} aria-label={t("app.viewOrders")}><BellIcon />{activeOrders > 0 && <span>{activeOrders}</span>}</button>
           </header>
           {/* Not a sign when it is also the fix: unpaired, this line is the
               shortest route to pairing, so it is a button. */}
           <section
             className="live-push-strip"
-            aria-label={syncState.live ? "同步状态" : "去连接双人小铺"}
+            aria-label={syncState.live ? t("sync.ariaStatus") : t("sync.ariaConnect")}
             role={syncState.live ? undefined : "button"}
             tabIndex={syncState.live ? undefined : 0}
             onClick={syncState.live ? undefined : () => setView("ours")}
           >
             <span className="live-push-icon"><BellIcon /></span>
             <div><strong>{syncState.title}</strong><small>{syncState.detail}</small></div>
-            {syncState.live ? <span className="live-state"><i /> 实时</span> : <span className="live-go">去连接</span>}
+            {syncState.live ? <span className="live-state"><i /> {t("sync.live")}</span> : <span className="live-go">{t("sync.goConnect")}</span>}
           </section>
           {view === "shop" && !openingDismissed && (
             <OpeningProgress steps={openingSteps} onDismiss={() => {
@@ -1752,8 +1797,8 @@ export default function Prototype() {
             }} />
           )}
           <section className="wallet-card">
-            <div className="coin-count"><HeartFilledIcon /><strong>{coins}</strong><span>甜心币</span></div>
-            <button className="earn-link" onClick={() => setView("tasks")}><CheckCircledIcon /><span>做任务赚币</span></button>
+            <div className="coin-count"><HeartFilledIcon /><strong>{coins}</strong><span>{t("app.coin", { count: coins })}</span></div>
+            <button className="earn-link" onClick={() => setView("tasks")}><CheckCircledIcon /><span>{t("app.earnCoins")}</span></button>
           </section>
 
           {view === "shop" && (
@@ -1841,37 +1886,39 @@ export default function Prototype() {
         </main>
       </MobileScroll>
 
-      <nav className="bottom-nav" aria-label="主要导航" style={{ bottom: bottomInset + 9 }}>
-        <button className={view === "shop" ? "active" : ""} onClick={() => setView("shop")}><HomeIcon /><span>小铺</span></button>
-        <button className={view === "tasks" ? "active" : ""} onClick={() => setView("tasks")}><TargetIcon /><span>任务</span></button>
-        <button className={view === "orders" ? "active" : ""} onClick={() => setView("orders")}><ArchiveIcon />{activeOrders > 0 && <i />}<span>订单</span></button>
-        <button className={view === "memories" ? "active" : ""} onClick={() => setView("memories")}><HeartIcon /><span>回忆</span></button>
-        <button className={view === "ours" ? "active" : ""} onClick={() => setView("ours")}><PersonIcon /><span>我们</span></button>
+      <nav className="bottom-nav" aria-label={t("nav.aria")} style={{ bottom: bottomInset + 9 }}>
+        <button className={view === "shop" ? "active" : ""} onClick={() => setView("shop")}><HomeIcon /><span>{t("nav.shop")}</span></button>
+        <button className={view === "tasks" ? "active" : ""} onClick={() => setView("tasks")}><TargetIcon /><span>{t("nav.tasks")}</span></button>
+        <button className={view === "orders" ? "active" : ""} onClick={() => setView("orders")}><ArchiveIcon />{activeOrders > 0 && <i />}<span>{t("nav.orders")}</span></button>
+        <button className={view === "memories" ? "active" : ""} onClick={() => setView("memories")}><HeartIcon /><span>{t("nav.memories")}</span></button>
+        <button className={view === "ours" ? "active" : ""} onClick={() => setView("ours")}><PersonIcon /><span>{t("nav.ours")}</span></button>
       </nav>
 
-      <BottomSheet open={Boolean(selected)} onOpenChange={(open) => !open && closeOrderSheet()} title={selected ? `点一份「${selected.name}」` : "确认点单"} description="对方会立刻收到新的心愿提醒">
+      <BottomSheet open={Boolean(selected)} onOpenChange={(open) => !open && closeOrderSheet()} title={selected ? t("order.sheetTitle", { name: localizedItem(selected, lang).name }) : t("order.sheetFallbackTitle")} description={t("order.sheetDesc")}>
         {selected && (
           <div className="order-sheet">
-            <div className="sheet-item"><div className="sheet-art"><MenuArt item={selected} /></div><div><h3>{selected.name}</h3><p>{selected.description}</p></div><div className="price-pill"><HeartFilledIcon /> {selected.price}</div></div>
+            <div className="sheet-item"><div className="sheet-art"><MenuArt item={selected} /></div><div><h3>{localizedItem(selected, lang).name}</h3><p>{localizedItem(selected, lang).description}</p></div><div className="price-pill"><HeartFilledIcon /> {selected.price}</div></div>
             <div className="time-options">
-              <span>希望什么时候</span>
-              <div>{DESIRED_TIMES.map((option) => <button key={option} className={time === option ? "active" : ""} onClick={() => setTime(option)}>{option}</button>)}</div>
+              <span>{t("order.when")}</span>
+              {/* The stored value is whatever was on screen when it was picked,
+                  so a language switch has to be normalised before comparing. */}
+              <div>{desiredTimes(lang).map((option) => <button key={option} className={localizeDesiredTime(time, lang) === option ? "active" : ""} onClick={() => setTime(option)}>{option}</button>)}</div>
             </div>
             <label className="order-note-field" htmlFor="order-time">
-              <span>或者写一个具体时间</span>
-              <KeyboardInput id="order-time" value={time} maxLength={40} onChange={(event) => setTime(event.target.value)} placeholder="例如：周六下午三点" />
+              <span>{t("order.customTime")}</span>
+              <KeyboardInput id="order-time" value={time} maxLength={40} onChange={(event) => setTime(event.target.value)} placeholder={t("order.customTimePlaceholder")} />
             </label>
             <label className="order-note-field" htmlFor="order-note">
-              <span>给对方的悄悄话</span>
-              <KeyboardInput id="order-note" value={note} maxLength={160} onChange={(event) => setNote(event.target.value)} placeholder="例如：想和你一起慢慢吃" />
+              <span>{t("order.note")}</span>
+              <KeyboardInput id="order-note" value={note} maxLength={160} onChange={(event) => setNote(event.target.value)} placeholder={t("order.notePlaceholder")} />
             </label>
             {selected.price > coins ? (
               <div className="order-short">
-                <strong>还差 {selected.price - coins} 甜心币</strong>
+                <strong>{t("order.short", { count: selected.price - coins })}</strong>
                 <p>
                   {cloudEnabled && !cloudCoupleId
-                    ? `和${partnerName}连上双人小铺，两个人各得 ${PAIRING_BONUS} 币，这份心愿马上就够。`
-                    : "做几个任务就能凑齐，任务每天零点刷新。"}
+                    ? t("order.shortPair", { partner: partnerName, bonus: PAIRING_BONUS })
+                    : t("order.shortTasks")}
                 </p>
                 <button
                   className="submit-order"
@@ -1880,122 +1927,125 @@ export default function Prototype() {
                     setView(cloudEnabled && !cloudCoupleId ? "ours" : "tasks");
                   }}
                 >
-                  {cloudEnabled && !cloudCoupleId ? `去连接${partnerName}` : "去做任务赚币"}
+                  {cloudEnabled && !cloudCoupleId ? t("order.goPair", { partner: partnerName }) : t("order.goTasks")}
                 </button>
               </div>
             ) : (
-              <button className="submit-order" onClick={submitOrder}><HeartFilledIcon /> 确认下单 · {selected.price} 甜心币</button>
+              <button className="submit-order" onClick={submitOrder}><HeartFilledIcon /> {t("order.confirm", { price: selected.price })}</button>
             )}
           </div>
         )}
       </BottomSheet>
 
-      <BottomSheet open={wishOpen} onOpenChange={(open) => (open ? setWishOpen(true) : closeWish())} title={editingWishId ? "修改这个心愿" : "写一个我们的心愿"} description={`价格 ${CUSTOM_PRICE_RANGE.min}–${CUSTOM_PRICE_RANGE.max} 甜心币，两个人都能修改`}>
+      <BottomSheet open={wishOpen} onOpenChange={(open) => (open ? setWishOpen(true) : closeWish())} title={t(editingWishId ? "wish.editTitle" : "wish.newTitle")} description={t("wish.desc", { min: CUSTOM_PRICE_RANGE.min, max: CUSTOM_PRICE_RANGE.max })}>
         <div className="memory-form">
           {/* A blank form asks people to be inventive on the spot, which is
               exactly when nothing comes to mind. */}
           {!editingWishId && (
             <div className="wish-templates">
-              <span>从一个例子开始</span>
+              <span>{t("wish.templates")}</span>
               <div className="wish-template-row">
-                {WISH_TEMPLATES.map((template) => (
-                  <button
-                    key={template.name}
-                    onClick={() => setWishDraft({ name: template.name, description: template.description, price: String(template.price), category: template.category })}
-                  >
-                    {template.name}
-                  </button>
-                ))}
+                {WISH_TEMPLATES.map((template) => {
+                  const copy = localizedTemplate(template, lang);
+                  return (
+                    <button
+                      key={template.name}
+                      onClick={() => setWishDraft({ name: copy.name, description: copy.description, price: String(template.price), category: template.category })}
+                    >
+                      {copy.name}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
-          <label className="account-field" htmlFor="wish-name"><span>心愿名字</span><KeyboardInput id="wish-name" value={wishDraft.name} maxLength={20} onChange={(event) => setWishDraft((current) => ({ ...current, name: event.target.value }))} placeholder="例如：陪我去菜市场" /></label>
-          <label className="account-field" htmlFor="wish-desc"><span>一句话介绍</span><KeyboardInput id="wish-desc" value={wishDraft.description} maxLength={40} onChange={(event) => setWishDraft((current) => ({ ...current, description: event.target.value }))} placeholder="例如：挑晚饭的菜，顺便牵手" /></label>
+          <label className="account-field" htmlFor="wish-name"><span>{t("wish.name")}</span><KeyboardInput id="wish-name" value={wishDraft.name} maxLength={20} onChange={(event) => setWishDraft((current) => ({ ...current, name: event.target.value }))} placeholder={t("wish.namePlaceholder")} /></label>
+          <label className="account-field" htmlFor="wish-desc"><span>{t("wish.summary")}</span><KeyboardInput id="wish-desc" value={wishDraft.description} maxLength={40} onChange={(event) => setWishDraft((current) => ({ ...current, description: event.target.value }))} placeholder={t("wish.summaryPlaceholder")} /></label>
           <div className="option-field">
-            <span>放进哪个分类</span>
+            <span>{t("wish.category")}</span>
             <div className="option-row">
               {CUSTOM_CATEGORIES.map((option) => (
                 <button key={option} className={wishDraft.category === option ? "active" : ""} onClick={() => setWishDraft((current) => ({ ...current, category: option }))}>
-                  {categoryMeta.find((meta) => meta.id === option)!.label}
+                  {localizedCategory(categoryMeta.find((meta) => meta.id === option)!, lang).label}
                 </button>
               ))}
             </div>
           </div>
-          <label className="account-field" htmlFor="wish-price"><span>要多少甜心币</span><KeyboardInput id="wish-price" value={wishDraft.price} inputMode="numeric" maxLength={3} onChange={(event) => setWishDraft((current) => ({ ...current, price: event.target.value.replace(/\D/g, "") }))} placeholder="48" /></label>
+          <label className="account-field" htmlFor="wish-price"><span>{t("wish.price")}</span><KeyboardInput id="wish-price" value={wishDraft.price} inputMode="numeric" maxLength={3} onChange={(event) => setWishDraft((current) => ({ ...current, price: event.target.value.replace(/\D/g, "") }))} placeholder="48" /></label>
           {confirmDelete === "wish" ? (
             <div className="delete-confirm">
-              <strong>下架后不会再出现在菜单里</strong>
-              <p>已经点过的订单会保留原来的名字和价格，不受影响。</p>
-              <button className="account-danger" disabled={cloudBusy} onClick={deleteWish}>{cloudBusy ? "正在下架…" : "确认下架"}</button>
-              <button className="account-secondary" onClick={() => setConfirmDelete(null)}>我再想想</button>
+              <strong>{t("wish.removeTitle")}</strong>
+              <p>{t("wish.removeBody")}</p>
+              <button className="account-danger" disabled={cloudBusy} onClick={deleteWish}>{t(cloudBusy ? "wish.removing" : "wish.removeConfirm")}</button>
+              <button className="account-secondary" onClick={() => setConfirmDelete(null)}>{t("common.thinkAgain")}</button>
             </div>
           ) : (
             <>
-              <button className="account-primary" disabled={cloudBusy} onClick={saveWish}>{cloudBusy ? "正在保存…" : editingWishId ? "保存修改" : "上架这个心愿"}</button>
-              {editingWishId && <button className="account-danger" onClick={() => setConfirmDelete("wish")}><TrashIcon /> 下架这个心愿</button>}
+              <button className="account-primary" disabled={cloudBusy} onClick={saveWish}>{cloudBusy ? t("common.saving") : editingWishId ? t("common.saveEdits") : t("wish.publish")}</button>
+              {editingWishId && <button className="account-danger" onClick={() => setConfirmDelete("wish")}><TrashIcon /> {t("wish.remove")}</button>}
             </>
           )}
         </div>
       </BottomSheet>
 
-      <BottomSheet open={settingsOpen} onOpenChange={(open) => (open ? setSettingsOpen(true) : closeSettings())} title="小铺资料" description={cloudCoupleId ? "保存后会同步到另一台 iPhone" : "连接双人云同步后，资料会自动同步"}>
+      <BottomSheet open={settingsOpen} onOpenChange={(open) => (open ? setSettingsOpen(true) : closeSettings())} title={t("settings.title")} description={t(cloudCoupleId ? "settings.descSynced" : "settings.descLocal")}>
         <div className="profile-sheet">
           <div className="profile-preview">
-            <span>{profileDraft.firstName.slice(0, 1) || "大"}</span>
-            <div><small>{profileDraft.shopName || "我们的小铺"}</small><strong>{profileDraft.firstName || "大宝"} & {profileDraft.secondName || "二宝"}</strong><p>从 {formatStartedOn(profileDraft.startedOn)} 开始</p></div>
-            <span className="partner">{profileDraft.secondName.slice(0, 1) || "二"}</span>
+            <span>{profileDraft.firstName.slice(0, 1) || DEFAULT_PROFILE.firstName.slice(0, 1)}</span>
+            <div><small>{profileDraft.shopName || DEFAULT_PROFILE.shopName}</small><strong>{profileDraft.firstName || DEFAULT_PROFILE.firstName} & {profileDraft.secondName || DEFAULT_PROFILE.secondName}</strong><p>{t("settings.startedFrom", { date: formatStartedOn(profileDraft.startedOn, lang) })}</p></div>
+            <span className="partner">{profileDraft.secondName.slice(0, 1) || DEFAULT_PROFILE.secondName.slice(0, 1)}</span>
           </div>
-          <label className="profile-field" htmlFor="shop-name"><span>小铺名称</span><KeyboardInput id="shop-name" value={profileDraft.shopName} maxLength={20} onChange={(event) => setProfileDraft((current) => ({ ...current, shopName: event.target.value }))} placeholder="例如：安安和小屿的心愿铺" /></label>
+          <label className="profile-field" htmlFor="shop-name"><span>{t("settings.shopName")}</span><KeyboardInput id="shop-name" value={profileDraft.shopName} maxLength={20} onChange={(event) => setProfileDraft((current) => ({ ...current, shopName: event.target.value }))} placeholder={t("settings.shopNamePlaceholder")} /></label>
           <div className="profile-name-grid">
-            <label className="profile-field" htmlFor="first-name"><span>第一位名字</span><KeyboardInput id="first-name" value={profileDraft.firstName} maxLength={20} onChange={(event) => setProfileDraft((current) => ({ ...current, firstName: event.target.value }))} placeholder="大宝" /></label>
-            <label className="profile-field" htmlFor="second-name"><span>第二位名字</span><KeyboardInput id="second-name" value={profileDraft.secondName} maxLength={20} onChange={(event) => setProfileDraft((current) => ({ ...current, secondName: event.target.value }))} placeholder="二宝" /></label>
+            <label className="profile-field" htmlFor="first-name"><span>{t("settings.firstName")}</span><KeyboardInput id="first-name" value={profileDraft.firstName} maxLength={20} onChange={(event) => setProfileDraft((current) => ({ ...current, firstName: event.target.value }))} placeholder={DEFAULT_PROFILE.firstName} /></label>
+            <label className="profile-field" htmlFor="second-name"><span>{t("settings.secondName")}</span><KeyboardInput id="second-name" value={profileDraft.secondName} maxLength={20} onChange={(event) => setProfileDraft((current) => ({ ...current, secondName: event.target.value }))} placeholder={DEFAULT_PROFILE.secondName} /></label>
           </div>
-          <label className="profile-field" htmlFor="started-on"><span>恋爱开始日期</span><KeyboardInput id="started-on" value={profileDraft.startedOn} inputMode="numeric" maxLength={10} onChange={(event) => setProfileDraft((current) => ({ ...current, startedOn: normalizeDateInput(event.target.value) }))} placeholder="YYYY-MM-DD" /><small>例如 2024-05-20，保存后会自动计算相爱天数</small></label>
-          <button className="save-profile" disabled={profileSaving} onClick={saveProfile}><CheckIcon />{profileSaving ? "正在保存…" : "保存小铺资料"}</button>
+          <label className="profile-field" htmlFor="started-on"><span>{t("settings.startedOn")}</span><KeyboardInput id="started-on" value={profileDraft.startedOn} inputMode="numeric" maxLength={10} onChange={(event) => setProfileDraft((current) => ({ ...current, startedOn: normalizeDateInput(event.target.value) }))} placeholder="YYYY-MM-DD" /><small>{t("settings.startedOnHint")}</small></label>
+          <button className="save-profile" disabled={profileSaving} onClick={saveProfile}><CheckIcon />{t(profileSaving ? "common.saving" : "settings.save")}</button>
         </div>
       </BottomSheet>
 
       <BottomSheet
         open={authOpen}
         onOpenChange={(open) => (open ? setAuthOpen(true) : closeAuth())}
-        title={protectedAccount ? "账户中心" : authCopy.title}
-        description={protectedAccount ? "账户已保护，换手机登录即可恢复" : authCopy.description}
+        title={protectedAccount ? t("account.center") : t(authCopy.title)}
+        description={protectedAccount ? t("account.protectedDesc") : t(authCopy.description)}
       >
         <div className="account-sheet">
           {authUser && !authUser.is_anonymous ? (
             <>
-              <div className="account-profile"><span><LockClosedIcon /></span><div><small>已验证账户</small><strong>{authUser.email ?? authUser.phone ?? "Apple 账户"}</strong><p>账户 ID 已安全绑定，不会向另一半展示</p></div></div>
-              <div className="account-benefits"><div><CheckCircledIcon /><span>换手机自动恢复配对</span></div><div><CheckCircledIcon /><span>支持密码找回和数据导出</span></div><div><CheckCircledIcon /><span>所有云端操作都有安全记录</span></div></div>
-              <button className="account-secondary" onClick={signOut}><ExitIcon /> 退出当前账户</button>
-              <button className="account-danger" onClick={() => { closeAuth(); setDangerConfirm("delete"); setPrivacyOpen(true); }}><TrashIcon /> 注销账户</button>
+              <div className="account-profile"><span><LockClosedIcon /></span><div><small>{t("account.verified")}</small><strong>{authUser.email ?? authUser.phone ?? t("account.apple")}</strong><p>{t("account.idNote")}</p></div></div>
+              <div className="account-benefits"><div><CheckCircledIcon /><span>{t("account.benefit1")}</span></div><div><CheckCircledIcon /><span>{t("account.benefit2")}</span></div><div><CheckCircledIcon /><span>{t("account.benefit3")}</span></div></div>
+              <button className="account-secondary" onClick={signOut}><ExitIcon /> {t("account.signOut")}</button>
+              <button className="account-danger" onClick={() => { closeAuth(); setDangerConfirm("delete"); setPrivacyOpen(true); }}><TrashIcon /> {t("account.delete")}</button>
             </>
           ) : (
             <>
-              {authMode !== "recover" && authMode !== "new-password" && authMode !== "phone" && <div className="auth-tabs"><button className={authMode === "signin" ? "active" : ""} onClick={() => setAuthMode("signin")}>登录</button><button className={authMode === "signup" ? "active" : ""} onClick={() => setAuthMode("signup")}>{authUser?.is_anonymous ? "升级账户" : "注册"}</button></div>}
+              {authMode !== "recover" && authMode !== "new-password" && authMode !== "phone" && <div className="auth-tabs"><button className={authMode === "signin" ? "active" : ""} onClick={() => setAuthMode("signin")}>{t("account.tabSignin")}</button><button className={authMode === "signup" ? "active" : ""} onClick={() => setAuthMode("signup")}>{t(authUser?.is_anonymous ? "account.tabUpgrade" : "account.tabSignup")}</button></div>}
               {authMode === "phone" ? (
                 <>
-                  <label className="account-field"><span>手机号（含国家区号）</span><KeyboardInput value={authPhone} onChange={(event) => setAuthPhone(event.target.value)} inputMode="tel" placeholder="例如 +8613812345678" /></label>
-                  {phoneOtpSent && <label className="account-field"><span>短信验证码</span><KeyboardInput value={authOtp} onChange={(event) => setAuthOtp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" placeholder="6 位验证码" /></label>}
+                  <label className="account-field"><span>{t("account.phoneLabel")}</span><KeyboardInput value={authPhone} onChange={(event) => setAuthPhone(event.target.value)} inputMode="tel" placeholder={t("account.phonePlaceholder")} /></label>
+                  {phoneOtpSent && <label className="account-field"><span>{t("account.otpLabel")}</span><KeyboardInput value={authOtp} onChange={(event) => setAuthOtp(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" placeholder={t("account.otpPlaceholder")} /></label>}
                 </>
               ) : authMode === "new-password" ? (
-                <label className="account-field"><span>新密码</span><KeyboardInput value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} type="password" placeholder="至少 6 位" /></label>
+                <label className="account-field"><span>{t("account.newPassword")}</span><KeyboardInput value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} type="password" placeholder={t("account.passwordPlaceholder")} /></label>
               ) : (
                 <>
-                  <label className="account-field"><span>邮箱</span><KeyboardInput value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} inputMode="email" autoCapitalize="none" placeholder="name@example.com" /></label>
-                  {authMode !== "recover" && <label className="account-field"><span>{authMode === "signup" ? "设置密码" : "密码"}</span><KeyboardInput value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} type="password" placeholder="至少 6 位" /></label>}
+                  <label className="account-field"><span>{t("account.email")}</span><KeyboardInput value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} inputMode="email" autoCapitalize="none" placeholder="name@example.com" /></label>
+                  {authMode !== "recover" && <label className="account-field"><span>{t(authMode === "signup" ? "account.setPassword" : "account.password")}</span><KeyboardInput value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} type="password" placeholder={t("account.passwordPlaceholder")} /></label>}
                 </>
               )}
-              {authMode === "signup" && <button className={`privacy-consent ${privacyAccepted ? "selected" : ""}`} onClick={() => { const next = !privacyAccepted; setPrivacyAccepted(next); localStorage.setItem(STORAGE_KEYS.privacyAccepted, next ? "1" : "0"); }}><span>{privacyAccepted ? <CheckIcon /> : null}</span><p>我已阅读并同意《用户协议》和《隐私政策》</p></button>}
-              <button className="account-primary" disabled={authBusy} onClick={submitAuth}>{authBusy ? "处理中…" : authCopy.primary}</button>
-              {authMode === "signin" && <button className="auth-link" onClick={() => setAuthMode("recover")}>忘记密码？找回账户</button>}
-              {(authMode === "recover" || authMode === "phone") && <button className="auth-link" onClick={() => { setAuthMode("signin"); setPhoneOtpSent(false); }}>返回邮箱登录</button>}
+              {authMode === "signup" && <button className={`privacy-consent ${privacyAccepted ? "selected" : ""}`} onClick={() => { const next = !privacyAccepted; setPrivacyAccepted(next); localStorage.setItem(STORAGE_KEYS.privacyAccepted, next ? "1" : "0"); }}><span>{privacyAccepted ? <CheckIcon /> : null}</span><p>{t("account.consent")}</p></button>}
+              <button className="account-primary" disabled={authBusy} onClick={submitAuth}>{authBusy ? t("common.processing") : t(authCopy.primary)}</button>
+              {authMode === "signin" && <button className="auth-link" onClick={() => setAuthMode("recover")}>{t("account.forgot")}</button>}
+              {(authMode === "recover" || authMode === "phone") && <button className="auth-link" onClick={() => { setAuthMode("signin"); setPhoneOtpSent(false); }}>{t("account.backToEmail")}</button>}
               {/* Only providers this deployment has actually configured are
                   offered: an unconfigured one leads straight into a failure. */}
               {authMode !== "recover" && authMode !== "new-password" && (phoneAuthEnabled || appleAuthEnabled) && (
                 <>
-                  <div className="auth-divider"><span>其他登录方式</span></div>
+                  <div className="auth-divider"><span>{t("account.otherMethods")}</span></div>
                   <div className="provider-grid">
-                    {phoneAuthEnabled && <button onClick={() => setAuthMode("phone")}><span>☎</span> 手机号</button>}
+                    {phoneAuthEnabled && <button onClick={() => setAuthMode("phone")}><span>☎</span> {t("account.phoneProvider")}</button>}
                     {appleAuthEnabled && <button onClick={signInWithApple}><span className="apple-mark">●</span> Apple</button>}
                   </div>
                 </>
@@ -2005,111 +2055,111 @@ export default function Prototype() {
         </div>
       </BottomSheet>
 
-      <BottomSheet open={memoryOpen} onOpenChange={(open) => (open ? setMemoryOpen(true) : closeMemory())} title={editingMemoryId ? "修改这份回忆" : "收藏照片回忆"} description={editingMemoryId ? "照片本身不可替换，删除后重新收藏即可" : "照片仅双人小铺成员可见，单张不超过 8MB"}>
+      <BottomSheet open={memoryOpen} onOpenChange={(open) => (open ? setMemoryOpen(true) : closeMemory())} title={t(editingMemoryId ? "memory.editTitle" : "memory.newTitle")} description={t(editingMemoryId ? "memory.editDesc" : "memory.newDesc")}>
         <div className="memory-form">
           {!editingMemoryId && (
             <>
               <input ref={fileInputRef} className="hidden-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={(event) => setMemoryFile(event.target.files?.[0] ?? null)} />
-              <button className={`photo-picker ${memoryFile ? "selected" : ""}`} onClick={() => fileInputRef.current?.click()}><CameraIcon /><strong>{memoryFile ? memoryFile.name : "选择一张照片"}</strong><span>{memoryFile ? `${(memoryFile.size / 1024 / 1024).toFixed(1)} MB` : "支持相册与相机"}</span></button>
+              <button className={`photo-picker ${memoryFile ? "selected" : ""}`} onClick={() => fileInputRef.current?.click()}><CameraIcon /><strong>{memoryFile ? memoryFile.name : t("memory.pickPhoto")}</strong><span>{memoryFile ? `${(memoryFile.size / 1024 / 1024).toFixed(1)} MB` : t("memory.pickHint")}</span></button>
             </>
           )}
-          <label className="account-field"><span>这张照片的故事</span><KeyboardInput value={memoryCaption} maxLength={160} onChange={(event) => setMemoryCaption(event.target.value)} placeholder="例如：第一次一起去看海" /></label>
-          <label className="account-field"><span>发生日期</span><KeyboardInput value={memoryDate} inputMode="numeric" maxLength={10} onChange={(event) => setMemoryDate(normalizeDateInput(event.target.value))} placeholder="YYYY-MM-DD" /></label>
-          <button className="account-primary" disabled={cloudBusy} onClick={saveMemory}>{cloudBusy ? "正在保存…" : editingMemoryId ? "保存修改" : "保存到双人回忆"}</button>
+          <label className="account-field"><span>{t("memory.story")}</span><KeyboardInput value={memoryCaption} maxLength={160} onChange={(event) => setMemoryCaption(event.target.value)} placeholder={t("memory.storyPlaceholder")} /></label>
+          <label className="account-field"><span>{t("memory.date")}</span><KeyboardInput value={memoryDate} inputMode="numeric" maxLength={10} onChange={(event) => setMemoryDate(normalizeDateInput(event.target.value))} placeholder="YYYY-MM-DD" /></label>
+          <button className="account-primary" disabled={cloudBusy} onClick={saveMemory}>{cloudBusy ? t("common.saving") : editingMemoryId ? t("common.saveEdits") : t("memory.save")}</button>
         </div>
       </BottomSheet>
 
-      <BottomSheet open={Boolean(memoryDetail)} onOpenChange={(open) => !open && closeMemoryDetail()} title="这份回忆" description={memoryDetail ? `记录于 ${memoryDetail.happenedOn}` : ""}>
+      <BottomSheet open={Boolean(memoryDetail)} onOpenChange={(open) => !open && closeMemoryDetail()} title={t("memory.detailTitle")} description={memoryDetail ? t("memory.recordedOn", { date: memoryDetail.happenedOn }) : ""}>
         {memoryDetail && (
           <div className="memory-detail">
             {memoryDetail.imageUrl
               ? <img src={memoryDetail.imageUrl} alt={memoryDetail.caption} draggable="false" />
-              : <div className="memory-detail-blank"><ImageIcon /><span>这条回忆没有照片</span></div>}
+              : <div className="memory-detail-blank"><ImageIcon /><span>{t("memory.noPhoto")}</span></div>}
             <h3>{memoryDetail.caption}</h3>
             <p>{memoryDetail.happenedOn}</p>
             {memoryDetail.createdBy && authUser && memoryDetail.createdBy !== authUser.id ? (
-              <p className="memory-detail-note">这是{partnerName}收藏的回忆，只有 TA 能修改或删除。</p>
+              <p className="memory-detail-note">{t("memory.partnerOwned", { partner: partnerName })}</p>
             ) : confirmDelete === "memory" ? (
               <div className="delete-confirm">
-                <strong>删除后无法恢复</strong>
-                <p>照片和这段文字都会从双人空间移除，{partnerName}那边也会一起消失。</p>
-                <button className="account-danger" disabled={cloudBusy} onClick={() => deleteMemory(memoryDetail)}>{cloudBusy ? "正在删除…" : "确认删除"}</button>
-                <button className="account-secondary" onClick={() => setConfirmDelete(null)}>我再想想</button>
+                <strong>{t("common.deleteIrreversible")}</strong>
+                <p>{t("memory.deleteBody", { partner: partnerName })}</p>
+                <button className="account-danger" disabled={cloudBusy} onClick={() => deleteMemory(memoryDetail)}>{t(cloudBusy ? "common.deleting" : "common.confirmDelete")}</button>
+                <button className="account-secondary" onClick={() => setConfirmDelete(null)}>{t("common.thinkAgain")}</button>
               </div>
             ) : (
               <div className="memory-detail-actions">
-                <button className="account-secondary" onClick={() => openEditMemory(memoryDetail)}><Pencil1Icon /> 修改文字</button>
-                <button className="account-danger" onClick={() => setConfirmDelete("memory")}><TrashIcon /> 删除回忆</button>
+                <button className="account-secondary" onClick={() => openEditMemory(memoryDetail)}><Pencil1Icon /> {t("memory.editText")}</button>
+                <button className="account-danger" onClick={() => setConfirmDelete("memory")}><TrashIcon /> {t("memory.delete")}</button>
               </div>
             )}
           </div>
         )}
       </BottomSheet>
 
-      <BottomSheet open={anniversaryOpen} onOpenChange={(open) => (open ? setAnniversaryOpen(true) : closeAnniversary())} title={editingAnniversaryId ? "管理纪念日" : "添加纪念日"} description="提醒会在打开小铺时出现，两个人都能修改">
+      <BottomSheet open={anniversaryOpen} onOpenChange={(open) => (open ? setAnniversaryOpen(true) : closeAnniversary())} title={t(editingAnniversaryId ? "annivSheet.manageTitle" : "annivSheet.addTitle")} description={t("annivSheet.desc")}>
         <div className="memory-form">
-          <label className="account-field"><span>纪念日名称</span><KeyboardInput value={anniversaryTitle} maxLength={40} onChange={(event) => setAnniversaryTitle(event.target.value)} placeholder="例如：第一次见面" /></label>
-          <label className="account-field"><span>日期</span><KeyboardInput value={anniversaryDate} inputMode="numeric" maxLength={10} onChange={(event) => setAnniversaryDate(normalizeDateInput(event.target.value))} placeholder="YYYY-MM-DD" /></label>
+          <label className="account-field"><span>{t("annivSheet.name")}</span><KeyboardInput value={anniversaryTitle} maxLength={40} onChange={(event) => setAnniversaryTitle(event.target.value)} placeholder={t("annivSheet.namePlaceholder")} /></label>
+          <label className="account-field"><span>{t("annivSheet.date")}</span><KeyboardInput value={anniversaryDate} inputMode="numeric" maxLength={10} onChange={(event) => setAnniversaryDate(normalizeDateInput(event.target.value))} placeholder="YYYY-MM-DD" /></label>
           <div className="option-field">
-            <span>重复方式</span>
+            <span>{t("annivSheet.repeat")}</span>
             <div className="option-row">
-              <button className={anniversaryRepeats ? "active" : ""} onClick={() => setAnniversaryRepeats(true)}>每年重复</button>
-              <button className={anniversaryRepeats ? "" : "active"} onClick={() => setAnniversaryRepeats(false)}>仅这一次</button>
+              <button className={anniversaryRepeats ? "active" : ""} onClick={() => setAnniversaryRepeats(true)}>{t("anniv.yearly")}</button>
+              <button className={anniversaryRepeats ? "" : "active"} onClick={() => setAnniversaryRepeats(false)}>{t("anniv.once")}</button>
             </div>
           </div>
           <div className="option-field">
-            <span>提前提醒</span>
+            <span>{t("annivSheet.remindAhead")}</span>
             <div className="option-row">
               {[0, 1, 3, 7].map((days) => (
-                <button key={days} className={anniversaryReminder === days ? "active" : ""} onClick={() => setAnniversaryReminder(days)}>{days === 0 ? "当天" : `${days} 天`}</button>
+                <button key={days} className={anniversaryReminder === days ? "active" : ""} onClick={() => setAnniversaryReminder(days)}>{days === 0 ? t("annivSheet.sameDay") : t("annivSheet.days", { days })}</button>
               ))}
             </div>
           </div>
-          <div className="reminder-note"><BellIcon /><div><strong>{anniversaryReminder === 0 ? "当天提醒" : `提前 ${anniversaryReminder} 天提醒`}</strong><p>提醒会在你打开小铺时出现；小铺不会在后台叫醒你。</p></div></div>
+          <div className="reminder-note"><BellIcon /><div><strong>{anniversaryReminder === 0 ? t("annivSheet.sameDayRemind") : t("annivSheet.aheadRemind", { days: anniversaryReminder })}</strong><p>{t("annivSheet.remindNote")}</p></div></div>
           {confirmDelete === "anniversary" ? (
             <div className="delete-confirm">
-              <strong>删除后无法恢复</strong>
-              <p>「{anniversaryTitle.trim() || "这个纪念日"}」会从双人小铺移除，之后也不会再提醒。</p>
-              <button className="account-danger" disabled={cloudBusy} onClick={deleteAnniversary}>{cloudBusy ? "正在删除…" : "确认删除"}</button>
-              <button className="account-secondary" onClick={() => setConfirmDelete(null)}>我再想想</button>
+              <strong>{t("common.deleteIrreversible")}</strong>
+              <p>{t("annivSheet.deleteBody", { title: anniversaryTitle.trim() || t("annivSheet.thisOne") })}</p>
+              <button className="account-danger" disabled={cloudBusy} onClick={deleteAnniversary}>{t(cloudBusy ? "common.deleting" : "common.confirmDelete")}</button>
+              <button className="account-secondary" onClick={() => setConfirmDelete(null)}>{t("common.thinkAgain")}</button>
             </div>
           ) : (
             <>
-              <button className="account-primary" disabled={cloudBusy} onClick={saveAnniversary}>{cloudBusy ? "正在保存…" : editingAnniversaryId ? "保存修改" : "保存纪念日"}</button>
-              {editingAnniversaryId && <button className="account-danger" onClick={() => setConfirmDelete("anniversary")}><TrashIcon /> 删除这个纪念日</button>}
+              <button className="account-primary" disabled={cloudBusy} onClick={saveAnniversary}>{cloudBusy ? t("common.saving") : editingAnniversaryId ? t("common.saveEdits") : t("annivSheet.save")}</button>
+              {editingAnniversaryId && <button className="account-danger" onClick={() => setConfirmDelete("anniversary")}><TrashIcon /> {t("annivSheet.delete")}</button>}
             </>
           )}
         </div>
       </BottomSheet>
 
-      <BottomSheet open={installHelpOpen} onOpenChange={setInstallHelpOpen} title="添加到主屏幕" description="装好之后才能收到对方的消息通知">
+      <BottomSheet open={installHelpOpen} onOpenChange={setInstallHelpOpen} title={t("install.title")} description={t("install.desc")}>
         <div className="install-help">
           <ol>
-            <li>用 <strong>Safari</strong> 打开这个网址（微信或其它 App 里的浏览器不行）</li>
-            <li>点底部中间的 <strong>分享</strong> 按钮</li>
-            <li>下滑选择 <strong>添加到主屏幕</strong></li>
-            <li>回到主屏幕，从新图标打开小铺</li>
+            <li>{t("install.step1Pre")}<strong>{t("install.step1Em")}</strong>{t("install.step1Post")}</li>
+            <li>{t("install.step2Pre")}<strong>{t("install.step2Em")}</strong>{t("install.step2Post")}</li>
+            <li>{t("install.step3Pre")}<strong>{t("install.step3Em")}</strong>{t("install.step3Post")}</li>
+            <li>{t("install.step4")}</li>
           </ol>
-          <p>装好后回到「我们」页开启通知，对方下单时你就能收到提醒。</p>
-          <button className="account-primary" onClick={() => setInstallHelpOpen(false)}>知道了</button>
+          <p>{t("install.note")}</p>
+          <button className="account-primary" onClick={() => setInstallHelpOpen(false)}>{t("common.gotIt")}</button>
         </div>
       </BottomSheet>
 
       <OnboardingSheet open={onboardingOpen} partnerName={partnerName} onFinish={finishOnboarding} />
 
-      <BottomSheet open={privacyOpen} onOpenChange={(open) => { setPrivacyOpen(open); if (!open) setDangerConfirm(null); }} title={dangerConfirm === "leave" ? "确认解除配对" : dangerConfirm === "delete" ? "确认注销账户" : "隐私与账户安全"} description="你的数据、你的选择，随时可以带走或删除">
+      <BottomSheet open={privacyOpen} onOpenChange={(open) => { setPrivacyOpen(open); if (!open) setDangerConfirm(null); }} title={t(dangerConfirm === "leave" ? "privacy.leaveTitle" : dangerConfirm === "delete" ? "privacy.deleteTitle" : "privacy.title")} description={t("privacy.desc")}>
         <div className="privacy-sheet">
           {dangerConfirm ? (
-            <div className="danger-confirm"><span><TrashIcon /></span><h3>{dangerConfirm === "leave" ? "解除后，两台手机将停止同步" : "注销后，账户无法恢复"}</h3><p>{dangerConfirm === "leave" ? "当前账户会离开双人小铺；另一半的账户和共同数据会保留。你以后仍可用新情侣码重新配对。" : "你的登录账户、配对关系和个人数据会立即删除；若小铺只剩你一人，共同数据也会一并删除。请先导出数据。"}</p><button className="danger-final" disabled={cloudBusy} onClick={confirmDangerAction}>{cloudBusy ? "正在处理…" : dangerConfirm === "leave" ? "确认解除配对" : "确认永久注销"}</button><button className="account-secondary" onClick={() => setDangerConfirm(null)}>我再想想</button></div>
+            <div className="danger-confirm"><span><TrashIcon /></span><h3>{t(dangerConfirm === "leave" ? "privacy.leaveHead" : "privacy.deleteHead")}</h3><p>{t(dangerConfirm === "leave" ? "privacy.leaveBody" : "privacy.deleteBody")}</p><button className="danger-final" disabled={cloudBusy} onClick={confirmDangerAction}>{cloudBusy ? t("common.working") : t(dangerConfirm === "leave" ? "privacy.leaveConfirm" : "privacy.deleteConfirm")}</button><button className="account-secondary" onClick={() => setDangerConfirm(null)}>{t("common.thinkAgain")}</button></div>
           ) : (
             <>
-              <div className="privacy-section"><span><LockClosedIcon /></span><div><strong>我们保存什么</strong><p>账户标识、情侣配对、订单、任务、签到、回忆照片、纪念日和必要的安全操作记录。</p></div></div>
-              <div className="privacy-section"><span><ReaderIcon /></span><div><strong>这些数据怎么使用</strong><p>只用于双人同步、提醒、账号恢复、防刷币和故障排查；不会出售给广告平台。</p></div></div>
-              <div className="privacy-section"><span><DownloadIcon /></span><div><strong>数据权利</strong><p>你可以随时导出数据、解除配对或注销账户。照片使用私有存储和短时访问链接。</p></div></div>
-              <div className="security-grid"><div><strong>限流</strong><span>订单、任务、签到</span></div><div><strong>审计</strong><span>关键操作留痕</span></div><div><strong>导出</strong><span>随时下载 JSON</span></div></div>
-              <div className="legal-links"><button onClick={() => window.open("/privacy.html", "_blank", "noopener,noreferrer")}>完整隐私政策</button><button onClick={() => window.open("/terms.html", "_blank", "noopener,noreferrer")}>完整用户协议</button></div>
-              <button className="account-secondary" onClick={exportData}><DownloadIcon /> 导出我的数据</button>
-              {authUser && !authUser.is_anonymous && <button className="account-danger" onClick={() => setDangerConfirm("delete")}><TrashIcon /> 注销账户</button>}
+              <div className="privacy-section"><span><LockClosedIcon /></span><div><strong>{t("privacy.storeTitle")}</strong><p>{t("privacy.storeBody")}</p></div></div>
+              <div className="privacy-section"><span><ReaderIcon /></span><div><strong>{t("privacy.useTitle")}</strong><p>{t("privacy.useBody")}</p></div></div>
+              <div className="privacy-section"><span><DownloadIcon /></span><div><strong>{t("privacy.rightsTitle")}</strong><p>{t("privacy.rightsBody")}</p></div></div>
+              <div className="security-grid"><div><strong>{t("privacy.rateLimit")}</strong><span>{t("privacy.rateLimitDetail")}</span></div><div><strong>{t("privacy.audit")}</strong><span>{t("privacy.auditDetail")}</span></div><div><strong>{t("privacy.export")}</strong><span>{t("privacy.exportDetail")}</span></div></div>
+              <div className="legal-links"><button onClick={() => window.open("/privacy.html", "_blank", "noopener,noreferrer")}>{t("privacy.fullPolicy")}</button><button onClick={() => window.open("/terms.html", "_blank", "noopener,noreferrer")}>{t("privacy.fullTerms")}</button></div>
+              <button className="account-secondary" onClick={exportData}><DownloadIcon /> {t("privacy.exportMine")}</button>
+              {authUser && !authUser.is_anonymous && <button className="account-danger" onClick={() => setDangerConfirm("delete")}><TrashIcon /> {t("account.delete")}</button>}
             </>
           )}
         </div>

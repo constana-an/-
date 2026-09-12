@@ -1,6 +1,7 @@
 import { CheckIcon, HeartFilledIcon, MagicWandIcon, Pencil1Icon, PlusIcon } from "@radix-ui/react-icons";
 import { Carousel } from "../shell";
-import { MENU, categoryMeta } from "../lib/catalog";
+import { MENU, categoryMeta, localizedCategory, localizedItem } from "../lib/catalog";
+import { useI18n } from "../i18n";
 import type { Category, MenuItem } from "../lib/types";
 import { MenuArt } from "./MenuArt";
 
@@ -28,7 +29,8 @@ export function ShopScreen({
   /** Spending power, so a wish out of reach says so before it is tapped. */
   coins: number;
 }) {
-  const activeMeta = categoryMeta.find((item) => item.id === category)!;
+  const { lang, t } = useI18n();
+  const activeMeta = localizedCategory(categoryMeta.find((item) => item.id === category)!, lang);
   // The couple's own wishes come first: they are the ones worth rediscovering.
   const items = [
     ...customItems.filter((item) => item.category === category),
@@ -37,7 +39,7 @@ export function ShopScreen({
   const canCustomise = category !== "limited";
   return (
     <>
-      <Carousel ariaLabel="点单分类" className="category-carousel" contentClassName="category-track">
+      <Carousel ariaLabel={t("shop.categoriesAria")} className="category-carousel" contentClassName="category-track">
         {categoryMeta.map((item) => {
           const Icon = item.icon;
           return (
@@ -48,7 +50,7 @@ export function ShopScreen({
               aria-pressed={category === item.id}
             >
               <Icon />
-              <span>{item.label}</span>
+              <span>{localizedCategory(item, lang).label}</span>
             </button>
           );
         })}
@@ -60,12 +62,12 @@ export function ShopScreen({
             <p>{activeMeta.subtitle}</p>
             <h2>{activeMeta.label}</h2>
           </div>
-          <span>{items.length} 个心愿</span>
+          <span>{t("shop.wishCount", { count: items.length })}</span>
         </div>
 
         <button className="random-card" onClick={onRandom}>
           <span className="random-icon"><MagicWandIcon /></span>
-          <span><strong>{category === "food" ? "不知道吃啥？" : "拿不定主意？"}</strong><small>让小铺从「{activeMeta.label}」里替你选一个</small></span>
+          <span><strong>{category === "food" ? t("shop.randomFood") : t("shop.randomOther")}</strong><small>{t("shop.randomHint", { category: activeMeta.label })}</small></span>
           <span className="random-go"><PlusIcon /></span>
         </button>
 
@@ -76,32 +78,33 @@ export function ShopScreen({
             // menu is out of reach on day one. Saying it here beats letting
             // someone fill in a time and a note first.
             const short = item.price - coins;
+            const copy = localizedItem(item, lang);
             return (
               <article className={`menu-card ${used ? "is-used" : ""} ${short > 0 ? "is-short" : ""}`.trim()} key={item.id}>
                 <div className="menu-art" style={{ background: item.tint }}><MenuArt item={item} /></div>
                 <div className="menu-copy">
                   <div className="menu-title-row">
-                    <h3>{item.name}</h3>
-                    {item.limited && <span className="limited-tag">{used ? "已使用" : "限一次"}</span>}
+                    <h3>{copy.name}</h3>
+                    {item.limited && <span className="limited-tag">{used ? t("shop.used") : t("shop.limitedOnce")}</span>}
                     {item.custom && (
-                      <button className="custom-edit" onClick={() => onEditCustom(item)} aria-label={`编辑${item.name}`}>
-                        <Pencil1Icon /> 我们写的
+                      <button className="custom-edit" onClick={() => onEditCustom(item)} aria-label={t("shop.editAria", { name: copy.name })}>
+                        <Pencil1Icon /> {t("shop.ourOwn")}
                       </button>
                     )}
                   </div>
-                  <p>{item.description}</p>
+                  <p>{copy.description}</p>
                   <div className="price-meta">
                     <div className="price-pill"><HeartFilledIcon /> {item.price}</div>
                     {used
-                      ? <span>这张券已经用掉了</span>
-                      : short > 0 && <span className="price-short">还差 {short} 币</span>}
+                      ? <span>{t("shop.couponUsed")}</span>
+                      : short > 0 && <span className="price-short">{t("shop.short", { count: short })}</span>}
                   </div>
                 </div>
                 <button
                   className="add-button"
                   onClick={() => onAdd(item)}
                   disabled={used}
-                  aria-label={used ? `${item.name}已使用` : `加入${item.name}`}
+                  aria-label={used ? t("shop.usedAria", { name: copy.name }) : t("shop.addAria", { name: copy.name })}
                 >
                   {used ? <CheckIcon /> : <PlusIcon />}
                 </button>
@@ -111,7 +114,7 @@ export function ShopScreen({
           {canCustomise && (
             <button className="add-wish-card" onClick={onAddCustom}>
               <span className="add-wish-icon"><PlusIcon /></span>
-              <span><strong>写一个我们自己的心愿</strong><small>只属于你们的{activeMeta.label}，价格自己定</small></span>
+              <span><strong>{t("shop.addWish")}</strong><small>{t("shop.addWishHint", { category: activeMeta.label })}</small></span>
             </button>
           )}
         </div>

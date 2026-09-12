@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ArchiveIcon, CameraIcon, CheckCircledIcon, CheckIcon, ClockIcon, Cross1Icon, HeartFilledIcon, ResetIcon } from "@radix-ui/react-icons";
-import { statusText } from "../lib/catalog";
+import { STATUS_TEXT, localizeDesiredTime, localizedItemName } from "../lib/catalog";
 import { relativeTime } from "../lib/date";
 import { KeyboardInput, useKeyboard } from "../shell";
+import { useI18n } from "../i18n";
+import type { TKey } from "../lib/i18n";
 import type { Order, OrderFilter, OrderStatus } from "../lib/types";
 import { MenuArt } from "./MenuArt";
 
@@ -14,11 +16,11 @@ const matchesFilter = (order: Order, filter: OrderFilter): boolean => {
   return order.status === filter;
 };
 
-const TABS: Array<{ id: OrderFilter; label: string; empty: string }> = [
-  { id: "active", label: "进行中", empty: "去小铺点一个新的心愿吧" },
-  { id: "done", label: "已完成", empty: "完成的心愿会留在这里" },
-  { id: "closed", label: "未完成", empty: "还没有被婉拒或撤回的心愿" },
-  { id: "all", label: "全部", empty: "去小铺点一个新的心愿吧" },
+const TABS: Array<{ id: OrderFilter; label: TKey; empty: TKey }> = [
+  { id: "active", label: "orders.tabActive", empty: "orders.tabActiveEmpty" },
+  { id: "done", label: "orders.tabDone", empty: "orders.tabDoneEmpty" },
+  { id: "closed", label: "orders.tabClosed", empty: "orders.tabClosedEmpty" },
+  { id: "all", label: "orders.tabAll", empty: "orders.tabAllEmpty" },
 ];
 
 export function OrdersScreen({
@@ -42,6 +44,7 @@ export function OrdersScreen({
   onFocusConsumed: () => void;
   onBrowseShop: () => void;
 }) {
+  const { lang, t } = useI18n();
   const [filter, setFilter] = useState<OrderFilter>("active");
   const [decliningId, setDecliningId] = useState<string | null>(null);
   const [declineNote, setDeclineNote] = useState("");
@@ -76,21 +79,21 @@ export function OrdersScreen({
   return (
     <section className="page-section orders-page">
       <div className="page-title">
-        <div><p>每一份期待都有回应</p><h2>我们的订单</h2></div>
+        <div><p>{t("orders.subtitle")}</p><h2>{t("orders.title")}</h2></div>
         <span className="round-icon"><ArchiveIcon /></span>
       </div>
       <div className="segment-control four">
         {TABS.map((tab) => (
           <button key={tab.id} className={filter === tab.id ? "active" : ""} aria-pressed={filter === tab.id} onClick={() => setFilter(tab.id)}>
-            {tab.label}
+            {t(tab.label)}
           </button>
         ))}
       </div>
       <div className="order-list">
         {visible.length === 0 ? (
           <div className="empty-card">
-            <CheckCircledIcon /><h3>这里空空的</h3><p>{activeTab.empty}</p>
-            <button className="empty-action" onClick={onBrowseShop}>去小铺看看</button>
+            <CheckCircledIcon /><h3>{t("orders.empty")}</h3><p>{t(activeTab.empty)}</p>
+            <button className="empty-action" onClick={onBrowseShop}>{t("orders.browse")}</button>
           </div>
         ) : visible.map((order) => {
           const mine = order.to === currentName;
@@ -103,53 +106,53 @@ export function OrdersScreen({
             >
               <div className="order-card-top">
                 <div className="order-art"><MenuArt item={order} /></div>
-                <div className="order-main"><span>{order.from} → {order.to}</span><h3>{order.itemName}</h3><p>{relativeTime(order.createdAt)} · {order.desiredTime}</p></div>
-                <span className={`status-badge status-${order.status}`}>{statusText[order.status]}</span>
+                <div className="order-main"><span>{order.from} → {order.to}</span><h3>{localizedItemName(order, lang)}</h3><p>{relativeTime(order.createdAt, lang)} · {localizeDesiredTime(order.desiredTime, lang)}</p></div>
+                <span className={`status-badge status-${order.status}`}>{STATUS_TEXT[lang][order.status]}</span>
               </div>
               {order.note && <div className="order-note">“{order.note}”</div>}
               {order.status === "pending" && (mine ? (
                 decliningId === order.id ? (
                   <div className="decline-form">
-                    <label htmlFor={`decline-${order.id}`}>说一句为什么，会让人好受一些（可不填）</label>
-                    <KeyboardInput id={`decline-${order.id}`} value={declineNote} maxLength={40} onChange={(event) => setDeclineNote(event.target.value)} placeholder="例如：今天太累了，明天补给你" />
+                    <label htmlFor={`decline-${order.id}`}>{t("orders.declineLabel")}</label>
+                    <KeyboardInput id={`decline-${order.id}`} value={declineNote} maxLength={40} onChange={(event) => setDeclineNote(event.target.value)} placeholder={t("orders.declinePlaceholder")} />
                     <div className="order-actions">
-                      <button className="ghost-action" onClick={closeDecline}>再想想</button>
-                      <button className="primary-action" onClick={() => confirmDecline(order.id)}>确认婉拒</button>
+                      <button className="ghost-action" onClick={closeDecline}>{t("orders.reconsider")}</button>
+                      <button className="primary-action" onClick={() => confirmDecline(order.id)}>{t("orders.confirmDecline")}</button>
                     </div>
                   </div>
                 ) : (
                   <div className="order-actions">
-                    <button className="ghost-action" onClick={() => startDecline(order.id)}><Cross1Icon /> 婉拒</button>
-                    <button className="primary-action" onClick={() => onStatus(order.id, "accepted")}><CheckIcon /> 接单</button>
+                    <button className="ghost-action" onClick={() => startDecline(order.id)}><Cross1Icon /> {t("orders.decline")}</button>
+                    <button className="primary-action" onClick={() => onStatus(order.id, "accepted")}><CheckIcon /> {t("orders.accept")}</button>
                   </div>
                 )
               ) : (
                 <>
-                  <div className="order-waiting"><ClockIcon /> 等 {order.to} 接单，婉拒会把甜心币退给你</div>
-                  <button className="wide-action ghost" onClick={() => onCancel(order.id)}><ResetIcon /> 撤回这个心愿</button>
+                  <div className="order-waiting"><ClockIcon /> {t("orders.waiting", { name: order.to })}</div>
+                  <button className="wide-action ghost" onClick={() => onCancel(order.id)}><ResetIcon /> {t("orders.cancel")}</button>
                 </>
               ))}
               {order.status === "accepted" && (mine
-                ? <button className="wide-action" onClick={() => onStatus(order.id, "doing")}><ClockIcon /> 开始准备</button>
-                : <div className="order-waiting"><CheckIcon /> {order.to} 已接单</div>)}
+                ? <button className="wide-action" onClick={() => onStatus(order.id, "doing")}><ClockIcon /> {t("orders.start")}</button>
+                : <div className="order-waiting"><CheckIcon /> {t("orders.accepted", { name: order.to })}</div>)}
               {order.status === "doing" && (mine
-                ? <button className="wide-action complete" onClick={() => onStatus(order.id, "done")}><HeartFilledIcon /> 完成心愿</button>
-                : <div className="order-waiting"><HeartFilledIcon /> {order.to} 正在准备中</div>)}
+                ? <button className="wide-action complete" onClick={() => onStatus(order.id, "done")}><HeartFilledIcon /> {t("orders.finish")}</button>
+                : <div className="order-waiting"><HeartFilledIcon /> {t("orders.preparing", { name: order.to })}</div>)}
               {order.status === "done" && (
                 <>
-                  <div className="order-waiting"><CheckCircledIcon /> {order.completedAt ? `${relativeTime(order.completedAt)}完成` : "已经完成"}</div>
+                  <div className="order-waiting"><CheckCircledIcon /> {order.completedAt ? t("orders.completedAt", { time: relativeTime(order.completedAt, lang) }) : t("orders.completed")}</div>
                   {/* It is already on the timeline; this only adds the photo. */}
-                  <button className="wide-action ghost" onClick={() => onKeepAsMemory(order)}><CameraIcon /> 补一张照片和故事</button>
+                  <button className="wide-action ghost" onClick={() => onKeepAsMemory(order)}><CameraIcon /> {t("orders.addPhoto")}</button>
                 </>
               )}
               {order.status === "rejected" && (
                 <>
-                  <div className="order-waiting"><Cross1Icon /> 这次没有接单，{order.price} 甜心币已退回给 {order.from}</div>
+                  <div className="order-waiting"><Cross1Icon /> {t("orders.rejectedNote", { price: order.price, name: order.from })}</div>
                   {order.declineNote && <div className="order-note">“{order.declineNote}”</div>}
                 </>
               )}
               {order.status === "cancelled" && (
-                <div className="order-waiting"><ResetIcon /> {order.from} 撤回了这个心愿，{order.price} 甜心币已退回</div>
+                <div className="order-waiting"><ResetIcon /> {t("orders.cancelledNote", { name: order.from, price: order.price })}</div>
               )}
             </article>
           );
